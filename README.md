@@ -85,9 +85,15 @@ pnpm tauri dev
 The app starts the capture bridge on `127.0.0.1:8722` (falls through to 8730) and
 shows extension captures next to the manual download form.
 
-Releases are cut from tags (`git tag v0.1.0 && git push --tags`) by
+Releases are cut from tags (`git tag v0.1.2 && git push origin v0.1.2`) by
 `.github/workflows/release.yml`; the updater reads
 `https://github.com/muzafferkadir/hazar/releases/latest/download/latest.json`.
+
+Before tagging, bump the version in **both** `package.json` and
+`src-tauri/tauri.conf.json` so the tag and the app version match — the updater
+compares the installed version against `latest.json`'s `version` field.
+Signing secrets: `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+(private key also in Bitwarden Secrets as `HAZAR_TAURI_SIGNING_PRIVATE_KEY`).
 
 ## Browser extension
 
