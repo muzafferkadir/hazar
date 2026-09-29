@@ -63,6 +63,7 @@
   let sha = $state('')
   let speedLimit = $state(0)
   let appSettings = $state<Record<string, unknown> | null>(null)
+  let extensionDir = $state<string | null>(null)
   let info = $state<ProbeInfo | null>(null)
   let written = $state(0)
   let total = $state(0)
@@ -103,6 +104,9 @@
       status = await invoke<CaptureStatus>('capture_status')
       queue = await invoke<QueueEntry[]>('capture_queue')
       if (!appSettings) appSettings = await invoke<Record<string, unknown>>('capture_settings_get')
+      if (!extensionDir) {
+        extensionDir = await invoke<string>('extension_path').catch(() => null)
+      }
     } catch (error) {
       console.error('capture status failed', error)
     }
@@ -113,6 +117,25 @@
     appSettings = { ...appSettings, ...patch }
     appSettings = await invoke<Record<string, unknown>>('capture_settings_set', { settings: appSettings })
     note('ayarlar kaydedildi')
+  }
+
+  async function revealExtension() {
+    try {
+      const path = await invoke<string>('extension_reveal')
+      note(`eklenti klasörü açıldı: ${path}`)
+    } catch (error) {
+      note(`klasör açılamadı: ${error}`)
+    }
+  }
+
+  async function copyExtensionPath() {
+    if (!extensionDir) return
+    try {
+      await navigator.clipboard.writeText(extensionDir)
+      note('eklenti klasörü yolu kopyalandı')
+    } catch (error) {
+      note(`kopyalanamadı: ${error}`)
+    }
   }
 
   async function cancelAll() {
@@ -330,6 +353,26 @@
 
     <section class="card">
       <div class="form-group">
+        <div class="form-label">Tarayıcı eklentisi (unpacked)</div>
+        <p class="field-hint">
+          Store'da yayınlanmıyor; eklenti klasörü uygulamayla birlikte gelir:
+        </p>
+        <p class="path">{extensionDir ?? 'bulunamadı'}</p>
+        <div class="button-group">
+          <button class="browse-btn" onclick={revealExtension} disabled={!extensionDir}>Klasörü göster</button>
+          <button class="browse-btn" onclick={copyExtensionPath} disabled={!extensionDir}>Yolu kopyala</button>
+        </div>
+        <p class="field-hint">
+          <b>Chrome / Edge:</b> <code>chrome://extensions</code> → Geliştirici modu aç →
+          “Paketlenmemiş öğe yükle” → bu klasörü seç.<br />
+          <b>Firefox:</b> <code>about:debugging</code> → “Geçici Eklenti Yükle” → klasördeki
+          <code>manifest.json</code>. Eklenti popup'ında “bağlı · :8722” görünmeli.
+        </p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="form-group">
         <label class="form-label" for="schedule">Gece indirme penceresi</label>
         <div class="content-grid">
           <div class="input-group">
@@ -431,6 +474,18 @@
     color: var(--text-2);
     white-space: pre-wrap;
     word-break: break-all;
+  }
+
+  .path {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-2);
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    word-break: break-all;
+    margin: 4px 0 8px;
   }
 
   .capture-pill {

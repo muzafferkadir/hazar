@@ -9,7 +9,8 @@ use hazar_engine::{
     DEFAULT_CONNECTIONS, DEFAULT_MIN_PART_SIZE, MAX_CONNECTIONS,
 };
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::bridge::{CaptureState, QueueEntry, StatusDto, PROGRESS_EVENT};
 
@@ -108,6 +109,45 @@ pub async fn engine_hls(
         resumed: outcome.resumed,
         elapsed_ms: outcome.elapsed.as_millis() as u64,
     })
+}
+
+/// Tarayıcı eklentisinin bulunduğu klasör (bundle resource ya da dev checkout).
+fn extension_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let candidates: Vec<std::path::PathBuf> = {
+        let mut list = Vec::new();
+        if let Ok(resource_dir) = app.path().resource_dir() {
+            list.push(resource_dir.join("extension"));
+            // Tauri üst dizinden gelen resource'ları `_up_/` altına koyar.
+            list.push(resource_dir.join("_up_").join("extension"));
+        }
+        list.push(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../extension")
+                .to_path_buf(),
+        );
+        list
+    };
+
+    candidates
+        .into_iter()
+        .find(|path| path.join("manifest.json").exists())
+        .ok_or_else(|| "extension klasörü bulunamadı".to_string())
+}
+
+/// Eklenti klasörünün tam yolu (UI'da gösterilir).
+#[tauri::command]
+pub fn extension_path(app: AppHandle) -> Result<String, String> {
+    extension_dir(&app).map(|path| path.display().to_string())
+}
+
+/// Eklenti klasörünü Finder/Explorer'da açar (kullanıcı "load unpacked" yapacak).
+#[tauri::command]
+pub fn extension_reveal(app: AppHandle) -> Result<String, String> {
+    let dir = extension_dir(&app)?;
+    app.opener()
+        .reveal_item_in_dir(&dir)
+        .map_err(|error| format!("klasör açılamadı: {error}"))?;
+    Ok(dir.display().to_string())
 }
 
 /// Capture/bridge status: where the extension should connect, and what it sent.

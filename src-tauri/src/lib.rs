@@ -72,7 +72,9 @@ pub fn run() {
             commands::capture_cancel_all,
             commands::capture_settings_get,
             commands::capture_settings_set,
-            commands::queue_add
+            commands::queue_add,
+            commands::extension_path,
+            commands::extension_reveal
         ])
         .run(tauri::generate_context!())
         .expect("error while running hazar");

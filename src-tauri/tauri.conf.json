@@ -35,6 +35,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "../extension": "extension/"
+    },
     "createUpdaterArtifacts": true,
     "macOS": {
       "signingIdentity": "-"
