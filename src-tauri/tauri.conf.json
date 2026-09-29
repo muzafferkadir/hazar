@@ -26,7 +26,9 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     }
   },
@@ -50,7 +52,7 @@
       "endpoints": [
         "https://github.com/muzafferkadir/hazar/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4QUFBMEI2QTYyQzY0MzAKUldRd1pDeW10cUNxbU81T3N2eUMwYit4VzBFTGN0R0ZuS3FzWUJxczM4TkwvOENmUExxSHdLakEK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgwRTIxM0E2M0EzOUZBNTUKUldSVitqazZwaFBpZ0h5Rzczc1RnUFhYSS9zb1J2SXhxaGp3TXAyaEVNT2plQThYcXplUW83cXAK",
       "windows": {
         "installMode": "passive"
       }
