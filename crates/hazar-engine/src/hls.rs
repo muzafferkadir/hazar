@@ -574,7 +574,23 @@ async fn fetch_text(client: &reqwest::Client, url: &str) -> Result<String> {
             url: url.to_string(),
         });
     }
-    Ok(resp.text().await?)
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let body = resp.text().await?;
+    // Hard sites answer the playlist request with an HTML error page or a
+    // client-side-encrypted blob; refuse it instead of parsing garbage.
+    if !body.trim_start().starts_with("#EXTM3U") {
+        return Err(Error::Protocol(format!(
+            "manifest is not an HLS playlist (content-type {content_type:?}, {} bytes, starts with {:?})",
+            body.len(),
+            body.trim_start().chars().take(24).collect::<String>()
+        )));
+    }
+    Ok(body)
 }
 
 async fn fetch_segment(

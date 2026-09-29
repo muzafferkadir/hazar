@@ -116,6 +116,13 @@ pub struct GrabRequest {
     pub tab_id: Option<i64>,
     #[serde(default)]
     pub save_dir: Option<String>,
+    /// Uygulamadan gelen işler için ek parametreler (extension bunları yok sayar).
+    #[serde(default)]
+    pub connections: Option<u32>,
+    #[serde(default)]
+    pub expected_sha256: Option<String>,
+    #[serde(default)]
+    pub speed_limit_bps: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +187,10 @@ pub enum Outbound {
     Queue {
         items: Vec<QueueItem>,
     },
+    /// Updated settings, pushed after the user changes them in the app.
+    Settings {
+        settings: Settings,
+    },
     Pong {
         t: u64,
     },
@@ -197,6 +208,21 @@ pub struct Settings {
     pub capture_enabled: bool,
     pub min_size_bytes: u64,
     pub excluded_hosts: Vec<String>,
+    /// Gece indirme penceresi (yerel saat, "HH:MM"); kapalıysa hep indirir.
+    #[serde(default)]
+    pub schedule_enabled: bool,
+    #[serde(default = "default_schedule_from")]
+    pub schedule_from: String,
+    #[serde(default = "default_schedule_to")]
+    pub schedule_to: String,
+}
+
+fn default_schedule_from() -> String {
+    "02:00".to_string()
+}
+
+fn default_schedule_to() -> String {
+    "08:00".to_string()
 }
 
 impl Default for Settings {
@@ -208,6 +234,9 @@ impl Default for Settings {
             capture_enabled: true,
             min_size_bytes: 512 * 1024,
             excluded_hosts: Vec::new(),
+            schedule_enabled: false,
+            schedule_from: default_schedule_from(),
+            schedule_to: default_schedule_to(),
         }
     }
 }

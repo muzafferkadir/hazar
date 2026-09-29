@@ -44,6 +44,7 @@ pub async fn engine_download(
     dest: String,
     connections: Option<usize>,
     sha256: Option<String>,
+    speed_limit_mbps: Option<f64>,
 ) -> Result<OutcomeDto, String> {
     let (tx, mut rx) = channel();
     let emitter = app.clone();
@@ -58,6 +59,9 @@ pub async fn engine_download(
         .min_part_size(DEFAULT_MIN_PART_SIZE);
     if let Some(sha) = sha256.filter(|s| !s.trim().is_empty()) {
         opts = opts.sha256(sha);
+    }
+    if let Some(mbps) = speed_limit_mbps.filter(|value| *value > 0.0) {
+        opts = opts.speed_limit((mbps * 1024.0 * 1024.0) as u64);
     }
 
     let downloader = Downloader::new(opts)
@@ -119,5 +123,75 @@ pub fn capture_queue(state: State<'_, Arc<CaptureState>>) -> Vec<QueueEntry> {
 
 #[tauri::command]
 pub fn capture_cancel(state: State<'_, Arc<CaptureState>>, id: String) -> bool {
-    state.cancel(&id)
+    state.cancel(&id) || state.inner().drop_pending(&id)
+}
+
+#[tauri::command]
+pub fn capture_cancel_all(state: State<'_, Arc<CaptureState>>) -> usize {
+    state.cancel_all()
+}
+
+#[tauri::command]
+pub fn capture_settings_get(state: State<'_, Arc<CaptureState>>) -> hazar_localapi::Settings {
+    state.settings()
+}
+
+#[tauri::command]
+pub fn capture_settings_set(
+    state: State<'_, Arc<CaptureState>>,
+    settings: hazar_localapi::Settings,
+) -> hazar_localapi::Settings {
+    state.set_settings(settings.clone());
+    state.inner().publish_settings(&settings);
+    state.settings()
+}
+
+/// Uygulamadan (form) kuyruğa indirme ekler; capture ile aynı yolu kullanır.
+#[tauri::command]
+pub fn queue_add(
+    app: AppHandle,
+    state: State<'_, Arc<CaptureState>>,
+    url: String,
+    dest: String,
+    connections: Option<usize>,
+    sha256: Option<String>,
+    speed_limit_mbps: Option<f64>,
+) -> String {
+    let kind = if hazar_engine::is_hls(&url, None) {
+        hazar_localapi::GrabKind::Hls
+    } else if hazar_engine::is_dash(&url, None) {
+        hazar_localapi::GrabKind::Dash
+    } else {
+        hazar_localapi::GrabKind::File
+    };
+    let speed_limit_bps = speed_limit_mbps
+        .filter(|value| *value > 0.0)
+        .map(|value| (value * 1024.0 * 1024.0) as u64);
+    let request = hazar_localapi::GrabRequest {
+        url: url.clone(),
+        kind,
+        filename: std::path::Path::new(&dest)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string()),
+        mime: None,
+        size: None,
+        method: Some("GET".to_string()),
+        referer: None,
+        user_agent: None,
+        cookie: None,
+        headers: Vec::new(),
+        segments: None,
+        manifest: None,
+        page_url: None,
+        tab_id: None,
+        save_dir: std::path::Path::new(&dest)
+            .parent()
+            .map(|parent| parent.display().to_string()),
+        connections: connections.map(|value| value as u32),
+        expected_sha256: sha256.filter(|value| !value.trim().is_empty()),
+        speed_limit_bps,
+    };
+    let id = format!("app-{}", crate::bridge::CaptureState::new_job_id());
+    crate::bridge::enqueue(state.inner(), &app, id.clone(), request, "app");
+    id
 }

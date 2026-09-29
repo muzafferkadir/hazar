@@ -16,6 +16,39 @@ use crate::probe::{probe, ResourceInfo};
 use crate::progress::{ProgressEvent, ProgressSender};
 
 const EMIT_INTERVAL: Duration = Duration::from_millis(120);
+
+/// Average-rate limiter shared by every worker of one download.
+///
+/// Deliberately simple (token bucket by elapsed time): a download that runs
+/// ahead of the limit sleeps until it is back on schedule.
+#[derive(Debug)]
+pub struct RateLimiter {
+    bytes_per_sec: u64,
+    state: Mutex<(Instant, u64)>,
+}
+
+impl RateLimiter {
+    pub fn new(bytes_per_sec: u64) -> Arc<Self> {
+        Arc::new(Self {
+            bytes_per_sec: bytes_per_sec.max(1),
+            state: Mutex::new((Instant::now(), 0)),
+        })
+    }
+
+    /// Account `bytes` transferred and sleep if we are ahead of the limit.
+    pub async fn acquire(&self, bytes: u64) {
+        let wait = {
+            let mut state = self.state.lock().expect("rate limiter");
+            let (started, total) = &mut *state;
+            *total += bytes;
+            let expected = Duration::from_secs_f64(*total as f64 / self.bytes_per_sec as f64);
+            expected.saturating_sub(started.elapsed())
+        };
+        if wait > Duration::from_millis(5) {
+            tokio::time::sleep(wait).await;
+        }
+    }
+}
 const META_SAVE_INTERVAL: Duration = Duration::from_millis(1500);
 
 #[derive(Clone)]
@@ -30,6 +63,8 @@ pub struct DownloadOptions {
     pub user_agent: Option<String>,
     /// Extra request headers (Referer, Cookie, Authorization, ...).
     pub headers: Vec<(String, String)>,
+    /// Global speed cap in bytes/second (`None` = unlimited).
+    pub speed_limit: Option<u64>,
     pub cancel: Option<Arc<AtomicBool>>,
 }
 
@@ -45,8 +80,15 @@ impl DownloadOptions {
             max_retries: 3,
             user_agent: None,
             headers: Vec::new(),
+            speed_limit: None,
             cancel: None,
         }
+    }
+
+    /// Cap the whole download (all connections together) to `bytes_per_sec`.
+    pub fn speed_limit(mut self, bytes_per_sec: u64) -> Self {
+        self.speed_limit = Some(bytes_per_sec.max(1));
+        self
     }
 
     /// Add a request header (replaces an existing one with the same name).
@@ -121,6 +163,7 @@ pub struct Downloader {
     opts: DownloadOptions,
     client: reqwest::Client,
     progress: Option<ProgressSender>,
+    limiter: Option<Arc<RateLimiter>>,
 }
 
 /// Shared client settings for probing and downloading.
@@ -202,10 +245,12 @@ pub fn default_client_full(
 impl Downloader {
     pub fn new(opts: DownloadOptions) -> Result<Self> {
         let client = default_client_with(opts.user_agent.as_deref(), &opts.headers)?;
+        let limiter = opts.speed_limit.map(RateLimiter::new);
         Ok(Self {
             opts,
             client,
             progress: None,
+            limiter,
         })
     }
 
@@ -214,10 +259,12 @@ impl Downloader {
     }
 
     pub fn with_client(opts: DownloadOptions, client: reqwest::Client) -> Self {
+        let limiter = opts.speed_limit.map(RateLimiter::new);
         Self {
             opts,
             client,
             progress: None,
+            limiter,
         }
     }
 
@@ -531,6 +578,9 @@ impl Downloader {
             };
             file.write_all(&chunk).await?;
             got += chunk.len() as u64;
+            if let Some(limiter) = &self.limiter {
+                limiter.acquire(chunk.len() as u64).await;
+            }
 
             {
                 let mut meta = shared.lock().expect("meta lock");
@@ -594,6 +644,9 @@ impl Downloader {
             let chunk = chunk?;
             file.write_all(&chunk).await?;
             written += chunk.len() as u64;
+            if let Some(limiter) = &self.limiter {
+                limiter.acquire(chunk.len() as u64).await;
+            }
             if last_emit.elapsed() >= EMIT_INTERVAL {
                 last_emit = Instant::now();
                 self.emit(ProgressEvent::PartProgress {

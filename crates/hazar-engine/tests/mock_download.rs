@@ -486,3 +486,38 @@ fn base_config() -> Config {
         truncate_bodies: 0,
     }
 }
+
+#[tokio::test]
+async fn speed_limit_slows_the_download_down() {
+    let size = 256 * 1024;
+    let server = start(size, base_config()).await;
+    let dir = tmp_dir("ratelimit");
+    let dest = dir.join("out.bin");
+
+    let started = std::time::Instant::now();
+    let outcome = Downloader::new(
+        DownloadOptions::new(server.url(), &dest)
+            .connections(4)
+            .min_part_size(64 * 1024)
+            .speed_limit(128 * 1024)
+            .sha256(server.digest.clone()),
+    )
+    .unwrap()
+    .run()
+    .await
+    .unwrap();
+    let elapsed = started.elapsed();
+
+    assert_eq!(outcome.size, size as u64);
+    assert!(server.matches(&dest));
+    assert!(
+        elapsed >= std::time::Duration::from_millis(1200),
+        "256 KiB at 128 KiB/s cannot finish in {elapsed:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(20),
+        "the limiter must not stall the download: {elapsed:?}"
+    );
+
+    std::fs::remove_dir_all(dir).ok();
+}

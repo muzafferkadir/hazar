@@ -251,6 +251,51 @@ fn packed_js(path: &str) -> String {
     )
 }
 
+/// A downloadable DASH ladder: init + N media segments + the MPD that names them.
+pub struct Dash {
+    pub routes: Vec<Route>,
+    pub manifest_path: String,
+    pub output: Vec<u8>,
+}
+
+pub fn dash_ladder(prefix: &str, segments: usize) -> Dash {
+    let init = blob(11, 4096);
+    let parts: Vec<Vec<u8>> = (0..segments)
+        .map(|index| blob((20 + index) as u8, 12 * 1024))
+        .collect();
+    let mut output = init.clone();
+    let mut routes = vec![Route::file(format!("{prefix}/init.mp4"), init)];
+    for (index, part) in parts.iter().enumerate() {
+        routes.push(Route::file(format!("{prefix}/seg-{}.m4s", index + 1), part.clone()));
+        output.extend_from_slice(part);
+    }
+    routes.push(Route::dash(
+        format!("{prefix}/manifest.mpd"),
+        format!(
+            r#"<?xml version="1.0" encoding="utf-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT{}S" profiles="urn:mpeg:dash:profile:isoff-live:2011">
+  <Period>
+    <AdaptationSet mimeType="video/mp4" segmentAlignment="true">
+      <Representation id="v0" bandwidth="800000" codecs="avc1.4d401f" width="640" height="360">
+        <SegmentTemplate timescale="1000" duration="6000" startNumber="1" initialization="{prefix}/init.mp4" media="{prefix}/seg-$Number$.m4s"/>
+      </Representation>
+      <Representation id="v1" bandwidth="4200000" codecs="avc1.640028" width="1920" height="1080">
+        <SegmentTemplate timescale="1000" duration="6000" startNumber="1" initialization="{prefix}/init.mp4" media="{prefix}/seg-$Number$.m4s"/>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
+"#,
+            segments * 6
+        ),
+    ));
+    Dash {
+        routes,
+        manifest_path: format!("{prefix}/manifest.mpd"),
+        output,
+    }
+}
+
 fn dash_manifest(prefix: &str, widevine: bool) -> String {
     let protection = if widevine {
         "<ContentProtection schemeIdUri=\"urn:uuid:EDEF8BA9-79D6-4ACE-A3C8-27DCD51D21ED\"/>"
@@ -431,6 +476,31 @@ pub fn build() -> Fixtures {
             headers: Vec::new(),
             expected_bytes: body,
             note: "503 + Retry-After → backoff ile başarı",
+            strategy: "attribute-scan",
+        });
+    }
+
+    {
+        // Hard sites answer the playlist request with HTML (client-side encrypted
+        // token): refuse it cleanly instead of parsing garbage.
+        routes.push(Route::new(
+            "/hls-fake/index.m3u8",
+            "text/html; charset=utf-8",
+            b"<html><body>token expired</body></html>".to_vec(),
+        ));
+        routes.push(Route::html(
+            "/hls-fake/page.html",
+            "<html><body><video src=\"/hls-fake/index.m3u8\"></video></body></html>".to_string(),
+        ));
+        cases.push(Case {
+            name: "hls-fake-html-manifest",
+            page_path: "/hls-fake/page.html".to_string(),
+            expectation: Expectation::Refused {
+                contains: "not an HLS playlist",
+            },
+            headers: Vec::new(),
+            expected_bytes: Vec::new(),
+            note: "playlist isteği HTML dönüyor (client-side şifreli) → temiz ret",
             strategy: "attribute-scan",
         });
     }
@@ -688,24 +758,22 @@ pub fn build() -> Fixtures {
 
     // ----------------------------------------------------------------- dash
     {
-        routes.push(Route::dash(
-            "/dash-plain/manifest.mpd",
-            dash_manifest("/dash-plain", false),
-        ));
+        let ladder = dash_ladder("/dash-plain", 4);
+        routes.extend(ladder.routes);
         routes.push(Route::html(
             "/dash-plain/page.html",
-            "<html><body><video src=\"/dash-plain/manifest.mpd\"></video></body></html>".to_string(),
+            format!(
+                "<html><body><video src=\"{}\"></video></body></html>",
+                ladder.manifest_path
+            ),
         ));
         cases.push(Case {
             name: "dash-segment-template",
             page_path: "/dash-plain/page.html".to_string(),
-            expectation: Expectation::DetectOnly {
-                kind: MediaKind::Dash,
-                drm: None,
-            },
+            expectation: Expectation::Download { kind: MediaKind::Dash },
             headers: Vec::new(),
-            expected_bytes: Vec::new(),
-            note: "DASH SegmentTemplate → tespit (indirme henüz yok)",
+            expected_bytes: ladder.output,
+            note: "DASH SegmentTemplate → init + 4 segment indirilir (en yüksek bandwidth)",
             strategy: "attribute-scan",
         });
     }

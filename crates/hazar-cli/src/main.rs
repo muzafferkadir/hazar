@@ -50,6 +50,9 @@ enum Command {
         /// Cookie header, e.g. `sid=abc; theme=dark`.
         #[arg(long)]
         cookie: Option<String>,
+        /// Global speed cap in MB/s (0 = unlimited).
+        #[arg(long, value_name = "MBPS")]
+        speed_limit: Option<f64>,
     },
     /// Download an HLS (m3u8) stream into one file.
     Hls {
@@ -61,6 +64,22 @@ enum Command {
         #[arg(short = 'n', long, default_value_t = DEFAULT_CONNECTIONS)]
         connections: usize,
         /// Verify the result against this SHA-256.
+        #[arg(long, value_name = "HEX")]
+        sha256: Option<String>,
+        #[arg(long)]
+        user_agent: Option<String>,
+        #[arg(long)]
+        referer: Option<String>,
+        #[arg(long)]
+        cookie: Option<String>,
+    },
+    /// Download a DASH (mpd) manifest into one file.
+    Dash {
+        url: String,
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        #[arg(short = 'n', long, default_value_t = DEFAULT_CONNECTIONS)]
+        connections: usize,
         #[arg(long, value_name = "HEX")]
         sha256: Option<String>,
         #[arg(long)]
@@ -89,6 +108,26 @@ fn main() -> ExitCode {
 
     let result = runtime.block_on(async {
         match cli.command {
+            Command::Dash {
+                url,
+                out,
+                connections,
+                sha256,
+                user_agent,
+                referer,
+                cookie,
+            } => {
+                dash_cmd(HlsArgs {
+                    url,
+                    out,
+                    connections,
+                    sha256,
+                    user_agent,
+                    referer,
+                    cookie,
+                })
+                .await
+            }
             Command::Probe { url } => probe_cmd(&url).await,
             Command::Hls {
                 url,
@@ -120,6 +159,7 @@ fn main() -> ExitCode {
                 user_agent,
                 referer,
                 cookie,
+                speed_limit,
             } => {
                 get_cmd(GetArgs {
                     url,
@@ -131,6 +171,7 @@ fn main() -> ExitCode {
                     user_agent,
                     referer,
                     cookie,
+                    speed_limit,
                 })
                 .await
             }
@@ -144,6 +185,52 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+async fn dash_cmd(args: HlsArgs) -> Result<(), String> {
+    let dest = args.out.clone().unwrap_or_else(|| {
+        let mut path = default_hls_name(&args.url);
+        path.set_extension("mp4");
+        path
+    });
+    println!("{} → {} (dash)", args.url, dest.display());
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    spawn_cancel_watcher(cancel.clone());
+
+    let options = hazar_engine::DashOptions {
+        manifest: args.url,
+        output: dest,
+        connections: args.connections,
+        user_agent: args.user_agent,
+        headers: extra_headers(args.referer, args.cookie),
+        expected_sha256: args.sha256,
+        cancel: Some(cancel),
+    };
+
+    let (tx, mut rx) = channel();
+    let mut renderer = Renderer::new();
+    let handle = tokio::spawn(async move { hazar_engine::download_dash(options, Some(tx)).await });
+    while let Some(event) = rx.recv().await {
+        renderer.on(&event);
+    }
+    let outcome = handle
+        .await
+        .map_err(|error| format!("dash task failed: {error}"))?
+        .map_err(|error| error.to_string())?;
+
+    renderer.finish(
+        &outcome.path,
+        outcome.size,
+        outcome.elapsed,
+        outcome.sha256.as_deref(),
+    );
+    println!(
+        "segments: {} | representation: {}",
+        outcome.segments,
+        outcome.representation.as_deref().unwrap_or("-")
+    );
+    Ok(())
 }
 
 async fn probe_cmd(url: &str) -> Result<(), String> {
@@ -181,6 +268,7 @@ struct GetArgs {
     user_agent: Option<String>,
     referer: Option<String>,
     cookie: Option<String>,
+    speed_limit: Option<f64>,
 }
 
 struct HlsArgs {
@@ -299,6 +387,9 @@ async fn get_cmd(args: GetArgs) -> Result<(), String> {
         .resume(!args.no_resume)
         .cancel_flag(cancel)
         .headers(extra_headers(args.referer.clone(), args.cookie.clone()));
+    if let Some(mbps) = args.speed_limit.filter(|value| *value > 0.0) {
+        opts = opts.speed_limit((mbps * 1024.0 * 1024.0) as u64);
+    }
     if let Some(sha) = args.sha256.clone() {
         opts = opts.sha256(sha);
     }

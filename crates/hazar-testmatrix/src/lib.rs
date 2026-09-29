@@ -266,11 +266,12 @@ pub async fn run(opts: &RunOptions) -> Report {
             eprintln!("\n== {} ({} candidates)", case.name, resolved.candidates.len());
             for candidate in &resolved.candidates {
                 eprintln!(
-                    "   {:<16} {:>3}  {}  {}",
+                    "   {:<16} {:>3}  {}  {}  segments={:?}",
                     candidate.strategy,
                     candidate.confidence,
                     candidate.kind.as_str(),
-                    candidate.url
+                    candidate.url,
+                    candidate.segments.as_ref().map(|list| list.len())
                 );
             }
         }
@@ -488,6 +489,20 @@ async fn download(candidate: &Candidate, case: &Case, root: &Path) -> Result<Pat
                 .map(|outcome| outcome.path)
                 .map_err(|error| error.to_string())
         }
-        MediaKind::Dash => Err("DASH download not implemented yet".to_string()),
+        MediaKind::Dash => {
+            let options = hazar_engine::DashOptions {
+                manifest: candidate.url.clone(),
+                output: dest,
+                connections: 4,
+                user_agent: None,
+                headers,
+                expected_sha256: digest,
+                cancel: None,
+            };
+            hazar_engine::download_dash(options, None)
+                .await
+                .map(|outcome| outcome.path)
+                .map_err(|error| error.to_string())
+        }
     }
 }

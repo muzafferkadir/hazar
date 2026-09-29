@@ -4,7 +4,7 @@
 //! engine job, mirrors progress back over the WebSocket and emits the same
 //! state to the UI.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -47,6 +47,12 @@ pub struct StatusDto {
     pub download_dir: String,
 }
 
+/// A grab waiting for a free slot / for the schedule window.
+struct PendingJob {
+    id: String,
+    request: GrabRequest,
+}
+
 #[derive(Default)]
 struct Queue {
     items: Vec<QueueEntry>,
@@ -82,6 +88,9 @@ pub struct CaptureState {
     port: Arc<Mutex<Option<u16>>>,
     server: Arc<Mutex<Option<ServerHandle>>>,
     queue: Arc<Mutex<Queue>>,
+    /// Jobs waiting for a concurrency slot or for the schedule window.
+    pending: Arc<Mutex<VecDeque<PendingJob>>>,
+    running: Arc<std::sync::atomic::AtomicUsize>,
     cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     settings: Arc<Mutex<Settings>>,
     last_emit: Arc<Mutex<HashMap<String, Instant>>>,
@@ -120,6 +129,58 @@ impl CaptureState {
                 .download_dir
                 .unwrap_or_else(default_download_dir),
         }
+    }
+
+    /// Unique job id for app-initiated downloads.
+    pub fn new_job_id() -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        format!("{nanos:x}{:x}", std::process::id())
+    }
+
+    /// Remove a waiting job (used when the UI cancels a queued item).
+    pub fn drop_pending(&self, id: &str) -> bool {
+        let mut pending = self.pending.lock().expect("pending");
+        match pending.iter().position(|job| job.id == id) {
+            Some(position) => pending.remove(position).is_some(),
+            None => false,
+        }
+    }
+
+    /// Push the current settings to every connected extension.
+    pub fn publish_settings(&self, settings: &Settings) {
+        self.broadcast(Outbound::Settings {
+            settings: settings.clone(),
+        });
+    }
+
+    /// Drop every waiting and running job.
+    pub fn cancel_all(&self) -> usize {
+        let dropped = {
+            let mut pending = self.pending.lock().expect("pending");
+            let count = pending.len();
+            pending.clear();
+            count
+        };
+        let running = {
+            let flags = self.cancels.lock().expect("cancel lock");
+            for flag in flags.values() {
+                flag.store(true, Ordering::Relaxed);
+            }
+            flags.len()
+        };
+        for entry in self.queue.lock().expect("queue lock").snapshot() {
+            if entry.state == "queued" || entry.state == "scheduled" || entry.state == "downloading" {
+                self.update(&entry.id, |entry| entry.state = "cancelled".into());
+            }
+        }
+        dropped + running
+    }
+
+    pub fn set_settings(&self, settings: Settings) {
+        *self.settings.lock().expect("settings lock") = settings;
     }
 
     /// Cancel an in-flight capture (returns false when it already finished).
@@ -169,13 +230,21 @@ impl CaptureState {
         match message.message {
             Inbound::Hello(_) => {}
             Inbound::Grab(grab) => {
-                let state = state.clone();
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    run_grab(app, state, grab.id, grab.request).await;
-                });
+                enqueue(state, app, grab.id, grab.request, "extension");
             }
             Inbound::Cancel(cancel) => {
+                let removed = state
+                    .pending
+                    .lock()
+                    .expect("pending")
+                    .iter()
+                    .position(|job| job.id == cancel.id)
+                    .map(|position| state.pending.lock().expect("pending").remove(position).is_some())
+                    .unwrap_or(false);
+                if removed {
+                    state.update(&cancel.id, |entry| entry.state = "cancelled".into());
+                    state.emit_queue(app);
+                }
                 if state.cancel(&cancel.id) {
                     state.update(&cancel.id, |entry| entry.state = "cancelling".into());
                     state.emit_queue(app);
@@ -230,16 +299,157 @@ impl CaptureState {
     }
 }
 
+/// Bir işi kuyruğa alır: boş slot ve (açıksa) zamanlama penceresi varsa hemen başlar.
+pub(crate) fn enqueue(
+    state: &Arc<CaptureState>,
+    app: &AppHandle,
+    id: String,
+    request: GrabRequest,
+    source: &str,
+) {
+    let settings = state.settings();
+    let scheduled = !schedule_allows(&settings);
+    let kind = match request.kind {
+        GrabKind::File => "file",
+        GrabKind::Hls => "hls",
+        GrabKind::Dash => "dash",
+    }
+    .to_string();
+    let filename = resolve_dest(&request, &settings)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string());
+
+    state
+        .pending
+        .lock()
+        .expect("pending")
+        .push_back(PendingJob {
+            id: id.clone(),
+            request,
+        });
+    state.queue.lock().expect("queue lock").upsert(QueueEntry {
+        id,
+        url: String::new(),
+        kind,
+        state: if scheduled { "scheduled" } else { "queued" }.into(),
+        source: source.to_string(),
+        written: 0,
+        total: 0,
+        filename,
+        path: None,
+        error: None,
+    });
+    state.emit_queue(app);
+    pump(state, app);
+}
+
+/// Boş slot olduğu ve zamanlama izin verdiği sürece bekleyen işleri başlatır.
+pub(crate) fn pump(state: &Arc<CaptureState>, app: &AppHandle) {
+    loop {
+        let settings = state.settings();
+        if !schedule_allows(&settings) {
+            return;
+        }
+        let max = settings.max_concurrent_downloads.max(1) as usize;
+        if state.running.load(std::sync::atomic::Ordering::Relaxed) >= max {
+            return;
+        }
+        let next = state.pending.lock().expect("pending").pop_front();
+        let Some(job) = next else {
+            return;
+        };
+
+        state
+            .running
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        state.update(&job.id, |entry| {
+            entry.state = "downloading".into();
+            if entry.url.is_empty() {
+                entry.url = job.request.url.clone();
+            }
+        });
+        state.emit_queue(app);
+
+        let state = state.clone();
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            run_grab(app.clone(), state.clone(), job.id, job.request).await;
+            state
+                .running
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            pump(&state, &app);
+        });
+    }
+}
+
+/// Zamanlama kapalıysa hep açık; açıksa "from-to" penceresi (gece yarısını sarabilir).
+fn schedule_allows(settings: &Settings) -> bool {
+    if !settings.schedule_enabled {
+        return true;
+    }
+    let minutes = |value: &str| -> Option<u32> {
+        let (hours, minutes) = value.split_once(':')?;
+        Some(hours.trim().parse::<u32>().ok()? * 60 + minutes.trim().parse::<u32>().ok()?)
+    };
+    let (Some(from), Some(to)) = (minutes(&settings.schedule_from), minutes(&settings.schedule_to))
+    else {
+        return true;
+    };
+    let now = {
+        let seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0) as i64
+            + local_offset_seconds();
+        ((seconds.rem_euclid(86_400)) / 60) as u32
+    };
+    if from <= to {
+        now >= from && now < to
+    } else {
+        now >= from || now < to
+    }
+}
+
+/// UTC→yerel fark (saniye). Tarih/saat kütüphanesi eklemeden pratik çözüm.
+fn local_offset_seconds() -> i64 {
+    // `date +%z` çıktısını kullan (her platformda var).
+    let output = std::process::Command::new("date").arg("+%z").output();
+    let Ok(output) = output else { return 0 };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let text = text.trim();
+    if text.len() < 5 {
+        return 0;
+    }
+    let sign = if text.starts_with('-') { -1 } else { 1 };
+    let hours: i64 = text[1..3].parse().unwrap_or(0);
+    let minutes: i64 = text[3..5].parse().unwrap_or(0);
+    sign * (hours * 3600 + minutes * 60)
+}
+
 /// Start the loopback API and wire it to the engine.
 pub fn start(app: AppHandle, settings: Settings) -> Arc<CaptureState> {
     let state = Arc::new(CaptureState {
         port: Arc::new(Mutex::new(None)),
         server: Arc::new(Mutex::new(None)),
         queue: Arc::new(Mutex::new(Queue::default())),
+        pending: Arc::new(Mutex::new(VecDeque::new())),
+        running: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         cancels: Arc::new(Mutex::new(HashMap::new())),
         settings: Arc::new(Mutex::new(settings.clone())),
         last_emit: Arc::new(Mutex::new(HashMap::new())),
     });
+
+    // Zamanlanmış işleri pencere açıldığında başlat.
+    {
+        let tick_state = state.clone();
+        let tick_app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(15)).await;
+                pump(&tick_state, &tick_app);
+            }
+        });
+    }
 
     let run_state = state.clone();
     let run_app = app.clone();
@@ -323,12 +533,23 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
 
     let headers = request.headers.clone();
     let user_agent = request.user_agent.clone();
+    let connections = request
+        .connections
+        .map(|value| value as usize)
+        .unwrap_or(settings.connections as usize)
+        .max(1);
     let result: GrabResult = match request.kind {
         GrabKind::File => {
             let mut opts = DownloadOptions::new(&request.url, &dest)
-                .connections(settings.connections as usize)
+                .connections(connections)
                 .cancel_flag(cancel.clone())
                 .headers(headers.clone());
+            if let Some(sha) = request.expected_sha256.clone() {
+                opts = opts.sha256(sha);
+            }
+            if let Some(limit) = request.speed_limit_bps {
+                opts = opts.speed_limit(limit);
+            }
             if let Some(ua) = user_agent.clone() {
                 opts = opts.user_agent(ua);
             }
@@ -355,7 +576,7 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
                 segments: request.segments.clone(),
                 base_url: request.page_url.clone(),
                 output: dest.clone(),
-                connections: settings.connections as usize,
+                connections,
                 user_agent,
                 headers,
                 expected_sha256: None,

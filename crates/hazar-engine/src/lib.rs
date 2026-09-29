@@ -16,6 +16,7 @@
 //! ```
 
 pub mod assemble;
+pub mod dash;
 pub mod download;
 pub mod error;
 pub mod hash;
@@ -26,9 +27,10 @@ pub mod probe;
 pub mod progress;
 pub mod resolve;
 
+pub use dash::{download_dash, DashOptions, DashOutcome, DashPlan};
 pub use download::{
     default_client, default_client_full, default_client_with, proxy_from_env, DownloadOptions,
-    Downloader, Outcome,
+    Downloader, Outcome, RateLimiter,
 };
 pub use error::{Error, Result};
 pub use hls::{

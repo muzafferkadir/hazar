@@ -17,6 +17,33 @@ pub fn run() {
             let capture = bridge::start(app.handle().clone(), hazar_localapi::Settings::default());
             app.manage(capture);
 
+            // Menu bar / tray icon: keep downloading while the window is closed.
+            {
+                use tauri::menu::{Menu, MenuItem};
+                use tauri::tray::TrayIconBuilder;
+                let open = MenuItem::with_id(app, "open", "Hazar'ı Aç", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&open, &quit])?;
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    TrayIconBuilder::new()
+                        .icon(icon)
+                        .tooltip("Hazar — indirme yöneticisi")
+                        .menu(&menu)
+                        .show_menu_on_left_click(true)
+                        .on_menu_event(|app, event| match event.id().as_ref() {
+                            "open" => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                            "quit" => app.exit(0),
+                            _ => {}
+                        })
+                        .build(app)?;
+                }
+            }
+
             // Native macOS translucency behind the transparent window.
             #[cfg(target_os = "macos")]
             {
@@ -41,7 +68,11 @@ pub fn run() {
             commands::engine_hls,
             commands::capture_status,
             commands::capture_queue,
-            commands::capture_cancel
+            commands::capture_cancel,
+            commands::capture_cancel_all,
+            commands::capture_settings_get,
+            commands::capture_settings_set,
+            commands::queue_add
         ])
         .run(tauri::generate_context!())
         .expect("error while running hazar");

@@ -61,6 +61,8 @@
   let dest = $state('')
   let connections = $state(8)
   let sha = $state('')
+  let speedLimit = $state(0)
+  let appSettings = $state<Record<string, unknown> | null>(null)
   let info = $state<ProbeInfo | null>(null)
   let written = $state(0)
   let total = $state(0)
@@ -100,9 +102,23 @@
     try {
       status = await invoke<CaptureStatus>('capture_status')
       queue = await invoke<QueueEntry[]>('capture_queue')
+      if (!appSettings) appSettings = await invoke<Record<string, unknown>>('capture_settings_get')
     } catch (error) {
       console.error('capture status failed', error)
     }
+  }
+
+  async function saveSettings(patch: Record<string, unknown>) {
+    if (!appSettings) appSettings = await invoke<Record<string, unknown>>('capture_settings_get')
+    appSettings = { ...appSettings, ...patch }
+    appSettings = await invoke<Record<string, unknown>>('capture_settings_set', { settings: appSettings })
+    note('ayarlar kaydedildi')
+  }
+
+  async function cancelAll() {
+    const dropped = await invoke<number>('capture_cancel_all')
+    note(`${dropped} iş iptal edildi`)
+    await refreshCapture()
   }
 
   async function cancelCapture(id: string) {
@@ -138,19 +154,18 @@
     total = 0
     speed = 0
     phase = 'download'
-    const isHls = /\.m3u8?(\?|#|$)/i.test(url)
     try {
-      const outcome = isHls
-        ? await invoke<Outcome>('engine_hls', { url, dest, connections })
-        : await invoke<Outcome>('engine_download', {
-            url,
-            dest,
-            connections,
-            sha256: sha.trim() ? sha.trim() : null,
-          })
+      // Kuyruğa ekle: ilerleme, iptal ve zamanlama aynı yoldan işler.
+      const id = await invoke<string>('queue_add', {
+        url,
+        dest,
+        connections,
+        sha256: sha.trim() ? sha.trim() : null,
+        speedLimitMbps: speedLimit > 0 ? speedLimit : null,
+      })
       phase = 'done'
-      note(`done: ${human(outcome.size)} in ${(outcome.elapsedMs / 1000).toFixed(1)}s → ${outcome.path}`)
-      if (outcome.sha256) note(`sha256: ${outcome.sha256}`)
+      note(`kuyruğa eklendi: ${id}`)
+      await refreshCapture()
     } catch (error) {
       phase = 'error'
       note(`failed: ${error}`)
@@ -288,12 +303,18 @@
           <input id="sha" class="file-input" bind:value={sha} placeholder="hex digest" disabled={busy} />
           <p class="field-hint">Uyuşmazsa indirme hata verir.</p>
         </div>
+        <div class="form-group">
+          <label class="form-label" for="speed">Hız limiti (MB/s)</label>
+          <input id="speed" class="file-input" type="number" min="0" step="0.5" bind:value={speedLimit} disabled={busy} />
+          <p class="field-hint">0 = sınırsız. Tüm connection'lar toplam bu hızı aşmaz.</p>
+        </div>
       </div>
 
       <div class="button-group">
         <button class="browse-btn" onclick={start} disabled={busy || !url || !dest}>
-          {busy ? 'Downloading…' : 'Download'}
+          {busy ? 'Ekleniyor…' : 'Kuyruğa ekle'}
         </button>
+        <button class="browse-btn" onclick={cancelAll}>Tümünü iptal</button>
       </div>
 
       {#if phase !== 'idle' || total > 0}
@@ -309,7 +330,39 @@
 
     <section class="card">
       <div class="form-group">
-        <div class="form-label">Extension'dan gelenler ({captured.length})</div>
+        <label class="form-label" for="schedule">Gece indirme penceresi</label>
+        <div class="content-grid">
+          <div class="input-group">
+            <input
+              id="schedule"
+              type="checkbox"
+              checked={Boolean(appSettings?.schedule_enabled)}
+              onchange={(event) => saveSettings({ schedule_enabled: event.currentTarget.checked })}
+            />
+            <span class="field-hint">kapalıysa hep indirir</span>
+          </div>
+          <div class="input-group">
+            <input
+              class="file-input"
+              value={String(appSettings?.schedule_from ?? '02:00')}
+              onchange={(event) => saveSettings({ schedule_from: event.currentTarget.value })}
+            />
+            <span class="field-hint">–</span>
+            <input
+              class="file-input"
+              value={String(appSettings?.schedule_to ?? '08:00')}
+              onchange={(event) => saveSettings({ schedule_to: event.currentTarget.value })}
+            />
+          </div>
+        </div>
+        <p class="field-hint">
+          Kuyruk bu pencerenin dışında "scheduled" kalır; pencere açılınca otomatik başlar
+          (max eşzamanlı: {String(appSettings?.max_concurrent_downloads ?? 3)}).
+        </p>
+      </div>
+
+      <div class="form-group">
+        <div class="form-label">Kuyruk ({queue.length}) — yakalanan: {captured.length}</div>
         <p class="field-hint">Klasör: {status?.downloadDir ?? '—'}</p>
       </div>
 
