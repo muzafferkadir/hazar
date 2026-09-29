@@ -1,95 +1,113 @@
-# Hazar Integration (browser extension)
+# Hazar Integration — kurulum (unpacked)
 
-MV3 extension for Chrome, Edge and Firefox. It hands downloads to the Hazar app
-over a loopback WebSocket and sniffs HLS/DASH streams.
+Hazar'ın tarayıcı eklentisi. Chrome Web Store / AMO'da **yayınlanmıyor**; klasör
+olarak verilir ve tarayıcıya "unpacked" yüklenir.
 
-## Kurulum (unpacked)
+## 1) Eklentiyi indir
 
-1. Chrome/Edge: `chrome://extensions` → Developer mode → **Load unpacked** → `extension/` dizinini seç.
-2. Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → `extension/manifest.json`.
-3. Hazar uygulamasını aç (köprü `127.0.0.1:8722-8730` aralığında dinler).
-4. Popup'ta durum **"bağlı · :8722"** olmalı. Değilse **Yeniden bağlan**.
+Release sayfasından `hazar-extension-vX.Y.Z.zip` dosyasını indir ve bir klasöre çıkar
+(örn. `~/hazar-extension`). Klasörün içinde `manifest.json` **doğrudan** görünmeli —
+yani zip'i çıkarınca `hazar-extension/manifest.json`, `hazar-extension/src/...` olsun.
 
-Store yayını için: `web-ext lint` (Firefox) / Chrome Web Store zip'i (`extension/` klasörünü zip'le).
+> Repodan kullanıyorsan: `extension/` klasörünün kendisi yeterli, zip gerekmez.
 
-## Ne yapıyor
+## 2) Hazar uygulamasını aç
 
-| Yakalama yolu | Mekanizma |
+- macOS: `Hazar.app` (DMG'den kurdun) · Windows: kurulumdan sonra **Hazar**
+- Uygulama açılınca köprü `127.0.0.1:8722-8730` üzerinde dinlemeye başlar.
+- Diğer indirmelerin devam etmesi için pencereyi kapatabilirsin; uygulama menü
+  çubuğunda/tray'de kalır (macOS: menü çubuğu → **Aç / Çıkış**).
+
+## 3) Tarayıcıya yükle
+
+**Chrome / Edge / Brave / Vivaldi**
+1. `chrome://extensions` (Edge: `edge://extensions`)
+2. Sağ üstte **Geliştirici modu**nu aç
+3. **Paketlenmemiş öğe yükle** → çıkardığın `hazar-extension` klasörünü seç
+
+**Firefox**
+1. `about:debugging#/runtime/this-firefox`
+2. **Geçici Eklenti Yükle…** → klasördeki `manifest.json` dosyasını seç
+   (Firefox geçici eklentileri tarayıcı kapanınca unutur; kalıcı olması için
+   imzalama gerekir — store kullanmadığımız için her oturumda tekrar yüklenir.)
+
+## 4) Çalıştığını doğrula
+
+Eklenti simgesine tıkla: durum **"bağlı · :8722"** olmalı. Değilse **Yeniden bağlan**.
+Uygulama kapalıysa "Hazar açık değil" yazar ve indirmeler tarayıcıda kalır (kaybolmaz).
+
+## 5) Güncelleme
+
+Eklenti tarayıcı tarayıcı elle güncellenir: yeni zip'i indir, aynı klasöre çıkar
+(üzerine yaz), sonra `chrome://extensions` → eklenti kartında **Yenile**.
+Uygulama (Hazar.app) kendi kendini günceller (updater `latest.json` okur).
+
+## Sorun giderme
+
+| belirti | çözüm |
 |---|---|
-| Tarayıcı indirmesi | `downloads.onCreated` → karar → `downloads.cancel` + app'e `grab`; app ack vermezse `downloads.resume` |
+| popup'ta "Hazar açık değil" | Uygulamayı aç; popup'ta **Yeniden bağlan** |
+| indirme hâlâ tarayıcıda iniyor | Options → "İndirmeleri yakala" açık mı; site `excluded_hosts` listesinde mi; boyut `min_size_bytes` altında mı |
+| yeni sekmede açılan oynatıcı | eklenti tüm çerçeveleri izler (`all_frames`), ama bazı siteler anti-DevTools/anti-otomasyon kullanır → uygulama capture mode ile doğrulanır |
+| Firefox: eklenti kayboldu | geçici eklenti; `about:debugging`'den tekrar yükle |
+
+---
+
+# Teknik notlar (geliştirici)
+
+Protokol, yakalama yolları ve testler aşağıda. (Ayrıntılı test planı:
+`../docs/CAPTURE-TESTPLAN.md`)
+
+## Yakalama yolları
+
+| yol | mekanizma |
+|---|---|
+| Tarayıcı indirmesi | `downloads.onCreated` → karar → `downloads.cancel` + uygulamaya `grab`; uygulama onaylamazsa `downloads.resume` |
 | Ağ başlıkları | `webRequest.onBeforeSendHeaders` (Cookie/Referer/UA) + `onHeadersReceived` (Content-Type/Disposition/Length) |
-| POST ile gelen indirme | Tespit edilir ama **devredilmez** (engine POST body replay etmiyor) — tarayıcıda kalır |
-| HLS/DASH manifest | `.m3u8`/`.mpd` isteği görülür, playlist bir kez `fetch` edilip segment listesi app'e birlikte verilir |
-| MSE (blob) streamleri | `page-hook.js` sayfa context'inde XHR/fetch'i izler, segment URL'lerini toplar; aynı dizindeki ≥3 segment "stream" sayılır |
-| Sayfa medyası | `content.js`: `<video>/<audio>/<source>/<embed>/<object>` + `og:video`/`twitter:player` meta taraması |
-| Context menu | "Download with Hazar" (link/video/audio/image) |
-| Yeniden yakalama | `declarativeNetRequest` session rule → `recapture.html#<url>` → taze cookie/session ile tekrar `grab` (IDM'in `captured.html` mekaniğinin karşılığı) |
+| POST ile gelen indirme | tespit edilir ama devredilmez (engine body replay etmiyor) |
+| HLS/DASH manifest | `.m3u8`/`.mpd` görülür, playlist bir kez çekilip segment listesi uygulamaya verilir |
+| MSE / tokensız segmentler | `page-hook.js` XHR/fetch'i izler; **MIME** (`video/mp2t` vb.) ile uzantısız segmentler de yakalanır |
+| Sayfa medyası | `content.js`: `<video>/<audio>/<source>/<embed>/<object>` + `og:video`/`twitter:player` |
+| Context menu | "Download with Hazar" |
+| Yeniden yakalama | `declarativeNetRequest` session rule → `recapture.html#<url>` → taze cookie ile tekrar `grab` |
+| Reklam filtresi | `is_ad_url` (engine) + Chromium `Network.setBlockedURLs` (test/browser katmanı) |
 
-## Protokol
+## Protokol (named JSON, `hazar.v1`)
 
-Named JSON, `crates/hazar-localapi` ile birebir. WebSocket subprotocol: `hazar.v1`.
-
-Extension → app:
+WebSocket: `ws://127.0.0.1:8722` (8722–8730 arası denenir), subprotocol `hazar.v1`.
+İlk mesaj `hello` olmalı; uygulama bağlantıya özel `session` döner.
 
 ```json
 {"type":"hello","protocol":1,"client":"chrome","extension_id":"…","version":"0.1.0"}
-{"type":"grab","session":"…","id":"…","request":{ "url":"…","kind":"file|hls|dash","filename":"…",
-  "mime":"…","size":null,"method":"GET","referer":"…","user_agent":"…","cookie":"a=b; c=d",
-  "headers":[["Authorization","Bearer …"]],"page_url":"…","tab_id":7,
-  "segments":["…"],"manifest":null }}
+{"type":"grab","session":"…","id":"…","request":{
+  "url":"…","kind":"file|hls|dash","filename":"…","mime":"…","size":null,
+  "method":"GET","referer":"…","user_agent":"…","cookie":"a=b; c=d",
+  "headers":[["Authorization","Bearer …"]],"page_url":"…","frame_url":"…","tab_id":7,
+  "segments":["…"],"manifest":null,"connections":null,"expected_sha256":null,"speed_limit_bps":null}}
 {"type":"cancel","session":"…","id":"…"}
 {"type":"media","session":"…","tab_id":7,"items":[…]}
 {"type":"ping","session":"…","t":1712345678}
 ```
 
-App → extension:
+Uygulama → eklenti: `hello_ok`, `hello_err`, `grab_ack`, `progress`, `finished`,
+`failed`, `queue`, `settings`, `pong`, `error`.
 
-```json
-{"type":"hello_ok","protocol":1,"app":"Hazar","version":"0.1.0","session":"…",
- "features":["grab","cancel","progress","hls"],"settings":{"connections":8,…}}
-{"type":"hello_err","reason":"protocol mismatch"}
-{"type":"grab_ack","id":"…","state":"downloading"}
-{"type":"progress","id":"…","phase":"download","written":123,"total":456,"connections":8,"speed_bps":0}
-{"type":"finished","id":"…","path":"/Users/…/file.zip","size":456,"sha256":null,"elapsed_ms":1234}
-{"type":"failed","id":"…","reason":"…"}
-{"type":"pong","t":1712345678}
-```
-
-Kimlik doğrulama: bağlantı yalnız loopback'e, subprotocol zorunlu, ilk mesaj `hello`
-olmalı ve app her bağlantıya özel bir `session` token'ı döner; sonraki mesajlarda
-bu token kontrol edilir. (IDM'in `?cid=&rnd=` handshake'inin isimli/JSON karşılığı.)
-
-## Ayarlar
-
-Popup ve options sayfası `chrome.storage.local` kullanır:
-
-- `capture_enabled` — hiç yakalama yapma
-- `capture_manifests` — HLS/DASH streamlerini de yakala
-- `group_hls` — segmentleri tek dosyada birleştir
-- `min_size_bytes` — altındaki indirmeler tarayıcıda kalır (varsayılan 512 KB)
-- `excluded_hosts` — `*.example.com` biçiminde host listesi
-- `deny_patterns` — URL regex listesi
-- `ports` — app aranacak port listesi
+Kimlik doğrulama: yalnız loopback + zorunlu subprotocol + `hello` + bağlantıya özel
+session token.
 
 ## Geliştirme / test
 
 ```bash
 node extension/test/lib.test.cjs       # saf yardımcılar (tarayıcısız)
 node extension/test/bridge.test.cjs    # gerçek Rust app + WebSocket uçtan uca
-# veya
-pnpm test:extension
-pnpm test:bridge
 pnpm check:extension                   # node --check ile syntax
 ```
 
-`bridge.test.cjs` gerçek `hazar-localapi` server'ını ayağa kaldırır
-(`cargo run --example echo_server`), extension'ın ürettiği `grab` payload'ının
-Rust tarafında birebir çözüldüğünü doğrular.
-
 ## Bilinen sınırlar
 
-- POST/PUT ile başlatılan indirmeler devredilmiyor (engine body replay desteklemiyor).
-- DASH (`.mpd`) yakalanır ama indirme henüz yok; app `failed` + açıklama döner.
-- safari yok (ayrı Safari App Extension gerekir).
-- `blob:` URL'ler tespit edilir, indirilemez (segment listesi varsa o kullanılır).
-- Widevine/DRM korumalı streamler indirilemez (bilinçli olarak kapsam dışı).
+- POST/PUT indirmeleri devredilmiyor (engine body replay etmiyor).
+- DASH `type="dynamic"` (canlı) manifestler reddedilir.
+- Client-side şifreli playlist'ler (ör. `master.m3u8?v=<token>` yanıtı `text/html`)
+  net hata ile reddedilir: `manifest is not an HLS playlist (…)`.
+- Widevine/DRM ve YouTube `n=` cipher: kod yok (tespit + temiz ret).
+- Safari yok (ayrı Safari App Extension gerekir).

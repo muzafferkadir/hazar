@@ -46,7 +46,8 @@ src                   Svelte 5 UI (şu an: tek indirme + canlı progress + log)
 | M3 | Cookie geçişi (extension `cookies` API) + Referer/UA/header aktarımı | **bitti** (store yayını hariç) |
 | M4 | HLS (m3u8 + AES-128 + resume + header) | **bitti** — DASH tespit edilir, indirme yok |
 | M5 | UI: queue (var), scheduler, speed limit, tray/menubar, kategori | kısmi |
-| M6 | Windows installer + notarize edilmiş macOS DMG + auto-update | iskelet hazır (CI + updater) |
+| M6 | Windows installer + notarize edilmiş macOS DMG + auto-update | **bitti** (v0.1.1 release: universal DMG + NSIS/MSI + updater artifact'ları) |
+| Ek | Extension dağıtımı | **store yok** — release'e `hazar-extension-vX.zip` eklenir, kullanıcı "load unpacked" ile yükler |
 
 ### M2/M3 — yakalama mimarisi (uygulandı)
 

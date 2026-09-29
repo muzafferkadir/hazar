@@ -98,8 +98,10 @@ Signing secrets: `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWO
 ## Browser extension
 
 `extension/` hands downloads to the app over the loopback WebSocket and sniffs
-HLS/DASH. Capture paths, the wire protocol and install steps live in
-`extension/README.md`.
+HLS/DASH. **No store listing**: every release ships an unpacked zip
+(`dist/hazar-extension-vX.Y.Z.zip` → `bash scripts/package-extension.sh`), and the
+user loads the extracted folder with "load unpacked". Capture paths, the wire
+protocol and the step-by-step install guide live in `extension/README.md`.
 
 ## Capture test matrix
 

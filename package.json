@@ -11,6 +11,7 @@
     "test": "vitest run --passWithNoTests",
     "test:extension": "node extension/test/lib.test.cjs",
     "test:bridge": "node extension/test/bridge.test.cjs",
+    "package:extension": "bash scripts/package-extension.sh",
     "check:extension": "node --check extension/src/background.js && node --check extension/src/content.js && node --check extension/src/popup.js && node --check extension/src/options.js && node --check extension/page-hook.js && node --check extension/recapture.js",
     "tauri": "tauri",
     "test:matrix": "cargo run -q -p hazar-testmatrix",

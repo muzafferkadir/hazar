@@ -48,6 +48,11 @@ jobs:
       # Engine tests run before packaging so a broken download never ships.
       - run: cargo test -p hazar-engine
 
+      # Tarayıcı eklentisi store'da yayınlanmıyor: release'e unpacked zip olarak eklenir.
+      - name: Package the browser extension (unpacked zip)
+        if: matrix.platform == 'macos-14'
+        run: bash scripts/package-extension.sh "${{ github.ref_name }}"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,3 +65,11 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
+
+      - name: Attach the extension zip to the release
+        if: matrix.platform == 'macos-14'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" dist/hazar-extension-*.zip --clobber \
+            || echo "release bulunamadı, zip yalnızca artifact olarak kaldı"
