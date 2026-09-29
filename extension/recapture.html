@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hazar — yeniden yakalama</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #17171a;
+        color: rgba(255, 255, 255, 0.92);
+        font: 13px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, sans-serif;
+      }
+      .card {
+        max-width: 480px;
+        padding: 22px 26px;
+        background: #202024;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+      }
+      h1 { font-size: 14px; margin: 0 0 8px; }
+      code { color: #a5b4fc; word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Hazar oturumu yeniliyor…</h1>
+      <p id="url" class="dim"></p>
+      <p id="status">Bağlantı tazelenip indirme tekrar denenecek.</p>
+    </div>
+    <script src="recapture.js"></script>
+  </body>
+</html>

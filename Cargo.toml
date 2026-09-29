@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/hazar-engine", "crates/hazar-cli", "crates/hazar-localapi", "crates/hazar-testmatrix", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Muzaffer Kadir Yılmaz"]
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "signal", "net"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "gzip", "brotli"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+sha2 = "0.10"
+futures-util = "0.3"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc", "block-padding"] }
+url = "2"
+tokio-tungstenite = "0.24"

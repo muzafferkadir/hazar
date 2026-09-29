@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Hazar",
+  "version": "0.1.0",
+  "identifier": "dev.mkdir.hazar",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "Hazar",
+        "width": 1040,
+        "height": 660,
+        "minWidth": 720,
+        "minHeight": 520,
+        "transparent": true,
+        "titleBarStyle": "Overlay"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/muzafferkadir/hazar/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4QUFBMEI2QTYyQzY0MzAKUldRd1pDeW10cUNxbU81T3N2eUMwYit4VzBFTGN0R0ZuS3FzWUJxczM4TkwvOENmUExxSHdLakEK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "hazar",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+    "test": "vitest run --passWithNoTests",
+    "test:extension": "node extension/test/lib.test.cjs",
+    "test:bridge": "node extension/test/bridge.test.cjs",
+    "check:extension": "node --check extension/src/background.js && node --check extension/src/content.js && node --check extension/src/popup.js && node --check extension/src/options.js && node --check extension/page-hook.js && node --check extension/recapture.js",
+    "tauri": "tauri",
+    "test:matrix": "cargo run -q -p hazar-testmatrix",
+    "test:matrix:browser": "cargo run -q -p hazar-testmatrix -- --browser"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tauri-apps/cli": "^2",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/node": "^24.13.3",
+    "svelte": "^5.56.10",
+    "svelte-check": "^4.7.6",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  }
+}

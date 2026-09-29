@@ -1,0 +1,26 @@
+[package]
+name = "hazar-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Hazar download engine: multi-connection segmented HTTP(S) + HLS downloads"
+
+[lib]
+name = "hazar_engine"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+futures-util = { workspace = true }
+aes = { workspace = true }
+cbc = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }

@@ -1,0 +1,62 @@
+name: Release
+
+# Tag a version to build + publish: git tag v0.1.0 && git push --tags
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # One macOS build for both architectures (avoids the slow Intel runner queue).
+          - platform: macos-14
+            target: universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          # The cargo workspace lives at the repo root, not inside src-tauri.
+          workspaces: .
+
+      - run: pnpm install --frozen-lockfile
+
+      # Engine tests run before packaging so a broken download never ships.
+      - run: cargo test -p hazar-engine
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Hazar ${{ github.ref_name }}'
+          releaseBody: 'Segmented multi-connection download manager. See the assets below to download.'
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}

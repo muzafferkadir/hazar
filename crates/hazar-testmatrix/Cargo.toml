@@ -1,0 +1,29 @@
+[package]
+name = "hazar-testmatrix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Hazar capture test matrix: fixtures, resolver strategies, browser and live profiles"
+
+[lib]
+name = "hazar_testmatrix"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hazar-testmatrix"
+path = "src/main.rs"
+
+[dependencies]
+hazar-engine = { path = "../hazar-engine" }
+hazar-localapi = { path = "../hazar-localapi" }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+aes = { workspace = true }
+cbc = { workspace = true }
+url = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+sha2 = { workspace = true }

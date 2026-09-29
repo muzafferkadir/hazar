@@ -1,0 +1,30 @@
+[package]
+name = "hazar"
+version = "0.1.0"
+description = "Hazar — multi-connection download manager"
+authors = ["Muzaffer Kadir Yılmaz"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix keeps the lib name unique on Windows.
+name = "hazar_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+hazar-engine = { path = "../crates/hazar-engine" }
+hazar-localapi = { path = "../crates/hazar-localapi" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+window-vibrancy = "0.6"
+tauri-plugin-decorum = "1"

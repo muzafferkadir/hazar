@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hazar — Ayarlar</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        padding: 16px 18px 24px;
+        width: 420px;
+        background: #17171a;
+        color: rgba(255, 255, 255, 0.92);
+        font: 12px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, sans-serif;
+      }
+      h1 { font-size: 14px; margin: 0 0 12px; }
+      label { display: block; margin-top: 12px; color: rgba(255, 255, 255, 0.7); }
+      input[type="text"], input[type="number"], textarea {
+        width: 100%;
+        margin-top: 4px;
+        padding: 6px 8px;
+        background: #202024;
+        color: inherit;
+        font: inherit;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 6px;
+      }
+      textarea { min-height: 74px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+      footer { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
+      button {
+        font: inherit;
+        padding: 6px 12px;
+        color: #fff;
+        background: #6366f1;
+        border: 0;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .hint { color: rgba(255, 255, 255, 0.45); margin-top: 4px; }
+      #saved { color: #32d74b; opacity: 0; transition: opacity 0.2s; }
+    </style>
+  </head>
+  <body>
+    <h1>Hazar Integration</h1>
+
+    <div class="row"><input type="checkbox" id="capture_enabled" /><label for="capture_enabled" style="margin: 0">İndirmeleri yakala</label></div>
+    <div class="row"><input type="checkbox" id="capture_manifests" /><label for="capture_manifests" style="margin: 0">HLS/DASH streamlerini de yakala</label></div>
+    <div class="row"><input type="checkbox" id="group_hls" /><label for="group_hls" style="margin: 0">HLS segmentlerini tek dosyada birleştir</label></div>
+
+    <label for="min_size_mb">Minimum boyut (MB) — altındaki indirmeler tarayıcıda kalır</label>
+    <input type="number" id="min_size_mb" min="0" step="0.5" />
+
+    <label for="ports">Port listesi (virgülle)</label>
+    <input type="text" id="ports" />
+    <div class="hint">Uygulama sırayla bu portları dener (varsayılan 8722–8730).</div>
+
+    <label for="excluded_hosts">Hariç tutulan host'lar (satır başına bir tane, <code>*.example.com</code> olur)</label>
+    <textarea id="excluded_hosts"></textarea>
+
+    <label for="deny_patterns">Yakalanmayacak URL regex'leri (satır başına bir tane)</label>
+    <textarea id="deny_patterns"></textarea>
+
+    <footer>
+      <span id="saved">kaydedildi</span>
+      <button id="save">Kaydet</button>
+    </footer>
+
+    <script src="options.js"></script>
+  </body>
+</html>

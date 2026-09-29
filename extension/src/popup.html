@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hazar</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #17171a;
+        --card: #202024;
+        --line: rgba(255, 255, 255, 0.08);
+        --text: rgba(255, 255, 255, 0.92);
+        --dim: rgba(255, 255, 255, 0.55);
+        --accent: #6366f1;
+        --danger: #ff453a;
+        --ok: #32d74b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        width: 360px;
+        background: var(--bg);
+        color: var(--text);
+        font: 12px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+      .dot.on { background: var(--ok); }
+      .dim { color: var(--dim); }
+      section { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+      h2 {
+        margin: 0 0 6px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--dim);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 5px 0;
+      }
+      .row + .row { border-top: 1px solid var(--line); }
+      .meta { min-width: 0; }
+      .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .kind {
+        display: inline-block;
+        padding: 0 5px;
+        border-radius: 4px;
+        background: rgba(99, 102, 241, 0.18);
+        color: #a5b4fc;
+        font-size: 10px;
+        margin-right: 5px;
+      }
+      button {
+        font: inherit;
+        color: var(--text);
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 4px 8px;
+        cursor: pointer;
+      }
+      button.primary { background: var(--accent); border-color: transparent; color: #fff; }
+      button:disabled { opacity: 0.45; cursor: default; }
+      .bar { height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+      .bar > i { display: block; height: 100%; background: var(--accent); }
+      footer { display: flex; justify-content: space-between; padding: 8px 12px; }
+      a { color: #a5b4fc; text-decoration: none; }
+      .empty { color: var(--dim); padding: 4px 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand"><span class="dot" id="dot"></span> Hazar</div>
+      <div class="dim" id="connection">bağlanıyor…</div>
+    </header>
+
+    <section>
+      <div class="row">
+        <label for="capture">İndirmeleri yakala</label>
+        <input type="checkbox" id="capture" />
+      </div>
+      <div class="row">
+        <label for="group">HLS segmentlerini tek dosyada birleştir</label>
+        <input type="checkbox" id="group" />
+      </div>
+    </section>
+
+    <section>
+      <h2>Bu sayfadaki medya</h2>
+      <div id="candidates"><div class="empty">Aday yok.</div></div>
+    </section>
+
+    <section>
+      <h2>Son aktarımlar</h2>
+      <div id="recent"><div class="empty">Henüz aktarım yok.</div></div>
+    </section>
+
+    <footer>
+      <button id="reconnect">Yeniden bağlan</button>
+      <a href="#" id="options">Ayarlar</a>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
