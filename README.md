@@ -144,6 +144,22 @@ Definition of done (offline + browser matrix green, youtube gated, player-gated
 sites verified through capture mode, legal/headless ceilings documented) lives in
 `docs/CAPTURE-TESTPLAN.md`.
 
+## End-to-end (kurulu uygulama)
+
+Reproduce the release smoke test against the installed app:
+
+```bash
+open -a Hazar                                    # köprü 127.0.0.1:8722'de dinlemeye başlar
+node tools/app-e2e.mjs                           # hello → 2 eşzamanlı grab (biri hız limitli) → sha256 → iptal
+node tools/extension-check.mjs                   # kurulu app'in içindeki eklentiyi headless Chrome'a yükler, bağlantıyı doğrular
+```
+
+`app-e2e.mjs` gerçek bir dosyayı indirir (`/tmp/hz-e2e`) ve referans SHA-256 ile
+karşılaştırır; iptal testinde yarım kalan `.hazar` sidecar'ının resume için durduğunu
+kontrol eder. `extension-check.mjs` `HAZAR_EXTENSION_DIR` (varsayılan:
+`/Applications/Hazar.app/Contents/Resources/extension`) ve `HAZAR_CHROME` ile
+özelleştirilebilir.
+
 ## Tests
 
 ```bash

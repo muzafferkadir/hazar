@@ -15,7 +15,9 @@
     "check:extension": "node --check extension/src/background.js && node --check extension/src/content.js && node --check extension/src/popup.js && node --check extension/src/options.js && node --check extension/page-hook.js && node --check extension/recapture.js",
     "tauri": "tauri",
     "test:matrix": "cargo run -q -p hazar-testmatrix",
-    "test:matrix:browser": "cargo run -q -p hazar-testmatrix -- --browser"
+    "test:matrix:browser": "cargo run -q -p hazar-testmatrix -- --browser",
+    "e2e:app": "node tools/app-e2e.mjs",
+    "e2e:extension": "node tools/extension-check.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.0",
