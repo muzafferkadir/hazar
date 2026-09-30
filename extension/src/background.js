@@ -1274,7 +1274,7 @@ function initContextMenus() {
 
 function initContentMessages() {
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    const tabId = sender && sender.tab ? sender.tab.id : null;
+    const tabId = sender && sender.tab ? sender.tab.id : (Number.isInteger(message && message.tabId) ? message.tabId : null);
     const pageUrl = sender && sender.tab ? sender.tab.url : null;
     const frameId = sender && typeof sender.frameId === "number" ? sender.frameId : null;
     // Frame'in kendi URL'i: page-hook'tan gelen adaylarda doğru Referer bu.

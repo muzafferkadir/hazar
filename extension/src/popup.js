@@ -4,7 +4,7 @@
 const send = (message) =>
   new Promise((resolve) => {
     try {
-      chrome.runtime.sendMessage(message, (response) => resolve(response || { ok: false }));
+      chrome.runtime.sendMessage(message, (response) => resolve(response || { ok: false, error: chrome.runtime.lastError?.message || "Extension yanıt vermedi" }));
     } catch (_) {
       resolve({ ok: false });
     }
@@ -105,6 +105,7 @@ async function renderCandidates() {
       .filter(Boolean)
       .join(" · ");
 
+    const errorMessage = el("div", { className: "dim", hidden: true, role: "alert" });
     const button = el("button", {
       className: "primary",
       textContent: sendable
@@ -145,8 +146,10 @@ async function renderCandidates() {
     button.addEventListener("click", async () => {
       button.disabled = true;
       button.textContent = "gönderildi";
+      errorMessage.hidden = true;
       const result = await send({
         type: "grab",
+        tabId: tab.id,
         url: candidate.url,
         kind: candidate.kind,
         pageUrl: candidate.pageUrl,
@@ -155,6 +158,8 @@ async function renderCandidates() {
       });
       if (!result.ok) {
         button.textContent = result.connected === false ? "app kapalı" : "hata";
+        errorMessage.textContent = humanize(result.error || "Hazar request’i kabul etmedi");
+        errorMessage.hidden = false;
         button.disabled = false;
       } else {
         setTimeout(renderRecent, 400);
@@ -174,6 +179,7 @@ async function renderCandidates() {
             document.createTextNode(name),
           ]),
           el("div", { className: "dim", textContent: detail }),
+          errorMessage,
         ]),
         el("div", { className: "row-actions" }, [frameButton, button].filter(Boolean)),
       ]),
