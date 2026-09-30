@@ -19,10 +19,13 @@ rm -f "$OUT"
 # Eklenti sürümünü app sürümüyle aynı tut (kullanıcı popup'ta tutarlı sürüm görsün).
 node -e "
   const fs = require('fs');
-  const path = '$ROOT/extension/manifest.json';
-  const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
-  manifest.version = '$VERSION';
-  fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
+  for (const name of ['manifest.json', 'manifest.firefox.json']) {
+    const path = '$ROOT/extension/' + name;
+    if (!fs.existsSync(path)) continue;
+    const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+    manifest.version = '$VERSION';
+    fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
+  }
 "
 
 cd "$ROOT/extension"

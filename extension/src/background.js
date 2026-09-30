@@ -60,6 +60,7 @@ const state = {
   stats: { active: 0, done: 0, failed: 0 },
   counters: { beforeRequest: 0, beforeSendHeaders: 0, headersReceived: 0, manifests: 0, candidates: 0, errors: 0 },
   ping: null,
+  lastGoodPort: null,
   log: [], // ring buffer, readable from the test harness via __hazarDebug()
 };
 
@@ -97,6 +98,7 @@ function loadSettings() {
   return new Promise((resolve) => {
     chrome.storage.local.get(DEFAULT_SETTINGS, (stored) => {
       state.settings = { ...DEFAULT_SETTINGS, ...(stored || {}) };
+      state.lastGoodPort = stored && stored.lastPort ? stored.lastPort : null;
       resolve(state.settings);
     });
   });
@@ -192,7 +194,11 @@ function connect() {
     debug(`connect skipped (connected=${isConnected()} connecting=${state.connecting})`);
     return;
   }
-  const ports = state.settings.ports || DEFAULT_SETTINGS.ports;
+  const configured = state.settings.ports || DEFAULT_SETTINGS.ports;
+  // Önce en son başarılı portu dene, sonra sırayla diğerleri.
+  const ports = state.lastGoodPort && configured.includes(state.lastGoodPort)
+    ? [state.lastGoodPort, ...configured.filter((value) => value !== state.lastGoodPort)]
+    : configured;
   if (!ports.length) return;
 
   state.connecting = true;
@@ -223,6 +229,7 @@ function connect() {
     state.socket = socket;
     state.connecting = false;
     state.port = port;
+    state.lastGoodPort = port;
     state.reconnectDelay = RECONNECT_MIN;
     // `rawSend`: the session only exists after the app answers this frame.
     rawSend({
@@ -354,6 +361,13 @@ function handleAppMessage(message) {
     case "hello_ok":
       state.session = message.session;
       state.appInfo = { app: message.app, version: message.version };
+      // Son çalışan portu hatırla: her seferinde 8722'den başlayıp 8724/8725'e
+      // kadar denemek konsolu gereksiz "CONNECTION_REFUSED" ile dolduruyordu.
+      try {
+        chrome.storage.local.set({ lastPort: state.port });
+      } catch (_) {
+        /* ignore */
+      }
       state.features = message.features || [];
       debug(`connected to ${message.app} ${message.version} on :${state.port}`);
       startKeepalive();

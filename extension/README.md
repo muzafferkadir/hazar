@@ -26,10 +26,12 @@ yani zip'i çıkarınca `hazar-extension/manifest.json`, `hazar-extension/src/..
 3. **Paketlenmemiş öğe yükle** → çıkardığın `hazar-extension` klasörünü seç
 
 **Firefox**
-1. `about:debugging#/runtime/this-firefox`
-2. **Geçici Eklenti Yükle…** → klasördeki `manifest.json` dosyasını seç
-   (Firefox geçici eklentileri tarayıcı kapanınca unutur; kalıcı olması için
-   imzalama gerekir — store kullanmadığımız için her oturumda tekrar yüklenir.)
+1. Klasörün bir kopyasını al (Chrome'a yüklediğin klasörü bozma)
+2. Kopyada `manifest.firefox.json` dosyasını `manifest.json` üzerine kopyala
+   (Chrome MV3 `background.scripts` anahtarını reddediyor, Firefox ise
+   `background.service_worker`'ı desteklemiyor — bu yüzden iki manifest ayrı duruyor.)
+3. `about:debugging#/runtime/this-firefox` → **Geçici Eklenti Yükle…** → `manifest.json`
+   (Firefox geçici eklentiyi kapanışta unutur; her oturumda tekrar yükle.)
 
 ## 4) Çalıştığını doğrula
 
@@ -50,6 +52,8 @@ Uygulama (Hazar.app) kendi kendini günceller (updater `latest.json` okur).
 | indirme hâlâ tarayıcıda iniyor | Options → "İndirmeleri yakala" açık mı; site `excluded_hosts` listesinde mi; boyut `min_size_bytes` altında mı |
 | yeni sekmede açılan oynatıcı | eklenti tüm çerçeveleri izler (`all_frames`), ama bazı siteler anti-DevTools/anti-otomasyon kullanır → uygulama capture mode ile doğrulanır |
 | Firefox: eklenti kayboldu | geçici eklenti; `about:debugging`'den tekrar yükle |
+| Chrome: `'background.scripts' requires manifest version of 2 or lower` | `manifest.firefox.json`'u `manifest.json` üzerine kopyalamışsın; Chrome için orijinal `manifest.json`'u kullan |
+| "Bu sayfadaki medya" boş | eklentiyi `chrome://extensions` → **Yenile** ile güncelle (eski popup sürümü hatası) |
 
 ---
 

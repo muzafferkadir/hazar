@@ -81,6 +81,7 @@ async function renderCandidates() {
   for (const candidate of candidates.slice(0, 8)) {
     const segments = candidate.segments || candidate.streams || [];
     const name = candidate.filename || candidate.url.split("/").pop() || candidate.url;
+    const encrypted = Boolean(candidate.encrypted);
     const detail = [
       candidate.kind,
       candidate.size ? humanBytes(candidate.size) : null,
@@ -91,7 +92,6 @@ async function renderCandidates() {
       .filter(Boolean)
       .join(" · ");
 
-    const encrypted = Boolean(candidate.encrypted);
     const button = el("button", {
       className: "primary",
       textContent: encrypted ? "şifreli (indirilemez)" : "Hazar'a gönder",
