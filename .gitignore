@@ -1,6 +1,7 @@
 node_modules
 target
 dist
+artifacts
 src-tauri/gen
 .DS_Store
 .env

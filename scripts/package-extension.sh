@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="${1:-$(node -p "require('$ROOT/package.json').version")}"
 # `git tag` v-prefix'li gelir (v0.1.1) → tek "v" kalacak şekilde normalize et.
 VERSION="${VERSION#v}"
-OUT_DIR="$ROOT/dist"
+OUT_DIR="$ROOT/artifacts"  # dist değil: `vite build` dist/ klasörünü siliyor
 OUT="$OUT_DIR/hazar-extension-v${VERSION}.zip"
 
 mkdir -p "$OUT_DIR"

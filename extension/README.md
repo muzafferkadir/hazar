@@ -5,7 +5,7 @@ olarak verilir ve tarayıcıya "unpacked" yüklenir.
 
 ## 1) Eklentiyi indir
 
-Release sayfasından `hazar-extension-vX.Y.Z.zip` dosyasını indir ve bir klasöre çıkar
+Release sayfasından `artifacts/hazar-extension-vX.Y.Z.zip` dosyasını indir ve bir klasöre çıkar
 (örn. `~/hazar-extension`). Klasörün içinde `manifest.json` **doğrudan** görünmeli —
 yani zip'i çıkarınca `hazar-extension/manifest.json`, `hazar-extension/src/...` olsun.
 
