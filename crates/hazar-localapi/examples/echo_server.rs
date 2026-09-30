@@ -19,7 +19,9 @@ async fn main() {
         ports: vec![0],
         ..Default::default()
     };
-    let (server, mut inbound) = hazar_localapi::server::start(cfg).await.expect("start server");
+    let (server, mut inbound) = hazar_localapi::server::start(cfg)
+        .await
+        .expect("start server");
     println!("PORT {}", server.port);
     println!("READY");
 
@@ -42,6 +44,13 @@ async fn main() {
                 }
                 Inbound::Cancel(cancel) => println!("CANCEL {}", cancel.id),
                 Inbound::Media(media) => println!("MEDIA {}", media.items.len()),
+                Inbound::Bytes(bytes) => println!(
+                    "BYTES {} {}/{} {}",
+                    bytes.stream_id,
+                    bytes.index,
+                    bytes.total,
+                    bytes.url.as_deref().unwrap_or("-")
+                ),
                 Inbound::Ping(_) => {}
                 Inbound::Hello(_) => {}
             },

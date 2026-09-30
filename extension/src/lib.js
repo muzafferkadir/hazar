@@ -257,35 +257,94 @@
   }
 
   /**
-   * Master playlist ise en yüksek BANDWIDTH'li varyantın URL'ini döndürür.
-   * Gerçek bölümlerde içerik önce varyant playlist'te listelenir; bu yüzden
-   * master → varyant → segment zincirini çözmek gerekir.
+   * Oynatıcının gerçekten istediği (ve 200 aldığı) segment URL'lerini tercih et.
+   *
+   * Playlist satırları göreliyse (`seg0.ts`) manifest'in `?token` sorgusu düşer;
+   * oynatıcı ise segmente token'ı ekleyerek ister. Aynı path için sniff edilmiş
+   * URL varsa onu kullan; henüz çekilmemiş kardeş segmentler için aynı dizinden
+   * gözlenen sorguyu uygula — yoksa indirme 403 yer.
    */
-  function bestVariantFromPlaylist(text, baseUrl) {
-    const source = String(text || "");
-    if (!source.includes("#EXT-X-STREAM-INF")) return null;
-    let best = null;
-    let pending = null;
-    for (const raw of source.split(String.fromCharCode(10))) {
-      const line = raw.trim();
-      if (!line) continue;
-      if (line.startsWith("#EXT-X-STREAM-INF:")) {
-        const match = /BANDWIDTH=(\d+)/i.exec(line);
-        pending = { bandwidth: match ? Number(match[1]) : 0, uri: null };
-        continue;
-      }
-      if (pending && !line.startsWith("#")) {
-        pending.uri = line;
-        if (!best || pending.bandwidth > best.bandwidth) best = pending;
-        pending = null;
+  function preferSniffedSegments(segments, sniffed) {
+    const list = sniffed || [];
+    const byPath = new Map();
+    const queryByDir = new Map();
+    for (const url of list) {
+      const path = pathOf(url);
+      if (path && !byPath.has(path)) byPath.set(path, url);
+      try {
+        const parsed = new URL(url);
+        const dir = `${parsed.host}|${parsed.pathname.split("/").slice(0, -1).join("/")}`;
+        if (parsed.search && !queryByDir.has(dir)) queryByDir.set(dir, parsed.search);
+      } catch (_) {
+        /* ignore */
       }
     }
-    if (!best || !best.uri) return null;
+    return (segments || []).map((url) => {
+      const match = byPath.get(pathOf(url));
+      if (match) return match;
+      try {
+        const parsed = new URL(url);
+        if (parsed.search) return url;
+        const dir = `${parsed.host}|${parsed.pathname.split("/").slice(0, -1).join("/")}`;
+        const search = queryByDir.get(dir);
+        if (!search) return url;
+        parsed.search = search;
+        return parsed.toString();
+      } catch (_) {
+        return url;
+      }
+    });
+  }
+
+  /**
+   * App hatası "durum kaynaklı" mı (403/401/timeout)? Bu durumda segmentleri
+   * oynatıcı oturumunda indiren byte-tunnel fallback'ine geçilir.
+   */
+  function statusish(reason) {
+    return /40[13]|401|403|status|unexpected status|timed? ?out/i.test(String(reason || ""));
+  }
+
+  /** Hata metnindeki URL'nin kısa etiketi: host + path (query/token atılır).
+   *  403'ün hangi segmentten geldiğini token sızdırmadan gösterir. */
+  function urlLabelOf(message) {
+    const match = String(message || "").match(/https?:\/\/[^\s"']+/i);
+    if (!match) return null;
     try {
-      return new URL(best.uri, baseUrl).toString();
+      const parsed = new URL(match[0]);
+      const path = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "";
+      return `${parsed.host}${path}`;
     } catch (_) {
       return null;
     }
+  }
+
+  /**
+   * Ham motor hatalarını kullanıcıya anlaşılır cümleye çevirir (app + popup ortak).
+   * Yanlış "tekrar oynat" döngüsü yaratan mesajlar düzeltildi: segment 403'ü
+   * manifest/oturum 403'ünden ayırır ve hatanın host'unu gösterir.
+   */
+  function humanizeError(message) {
+    const text = String(message || "");
+    const host = urlLabelOf(text);
+    const where = host ? ` (${host})` : "";
+    if (/yakalanmış playlist gövdesi yok/i.test(text)) {
+      return 'oynatıcının playlist yanıtı yakalanmadı — videoyu oynat, popup\'ı yenile, sonra "Sayfada indir"';
+    }
+    if (/^segment \d+\/\d+:.*403/.test(text)) {
+      return `CDN segment isteğini reddetti (403)${where} — segment URL'i oynatıcı oturumuna bağlı. Videoyu oynat, segmentler akarken popup'tan "Sayfada indir" kullan`;
+    }
+    if (/403/.test(text)) {
+      return `CDN isteği 403 döndü${where} — bu URL oynatıcı oturumuna bağlı. Videoyu oynat, segmentler akarken popup'tan "Sayfada indir" kullan`;
+    }
+    if (/404/.test(text) && /(\.m3u8|\.mpd|l\.php)/.test(text)) {
+      return "bağlantının süresi dolmuş (oynatıcı tek kullanımlık token) — videoyu oynatıp tekrar gönder";
+    }
+    if (/not an HLS playlist/.test(text)) {
+      return "stream tarayıcıda şifreli çözülüyor — indirilemiyor";
+    }
+    if (/SAMPLE-AES|widevine|playready/i.test(text)) return "DRM korumalı — indirilemiyor";
+    if (/timed out|timeout/i.test(text)) return `zaman aşımı: ${text}`;
+    return text;
   }
 
   /** Trailing number of a segment URL; used for ordering. */
@@ -354,7 +413,10 @@
     groupSegments,
     segmentsFromPlaylist,
     bestVariantFromPlaylist,
-    bestVariantFromPlaylist,
+    preferSniffedSegments,
+    humanizeError,
+    statusish,
+    urlLabelOf,
     segmentIndex,
     bestStream,
     forwardableHeaders,

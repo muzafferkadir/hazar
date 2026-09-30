@@ -21,6 +21,7 @@ const FILE_NAME: &str = "fixture.bin";
 struct Config {
     ignore_range: bool,
     declare_ranges: bool,
+    wrong_range: bool,
     /// Truncate the body of the first N body responses (dropped connections).
     truncate_bodies: usize,
 }
@@ -161,7 +162,7 @@ async fn handle(
         let (start, end) = parse_range(range.as_deref().unwrap_or("bytes=0-"), total);
         (
             206,
-            format!("Content-Range: bytes {start}-{end}/{total}\r\n"),
+            format!("Content-Range: bytes {}-{end}/{total}\r\n", if cfg.wrong_range { start + 1 } else { start }),
             start,
             end,
         )
@@ -417,6 +418,7 @@ async fn single_connection_when_server_advertises_no_ranges() {
         size,
         Config {
             declare_ranges: false,
+            wrong_range: false,
             ..base_config()
         },
     )
@@ -483,6 +485,7 @@ fn base_config() -> Config {
     Config {
         ignore_range: false,
         declare_ranges: true,
+            wrong_range: false,
         truncate_bodies: 0,
     }
 }
@@ -519,5 +522,26 @@ async fn speed_limit_slows_the_download_down() {
         "the limiter must not stall the download: {elapsed:?}"
     );
 
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
+async fn rejects_wrong_content_range_and_preserves_existing_output() {
+    let server = start(2 * 1024 * 1024, Config { declare_ranges: true, ignore_range: false, truncate_bodies: 0, wrong_range: true }).await;
+    let dir = tmp_dir("wrong-range"); let dest = dir.join("file.bin");
+    std::fs::write(&dest, b"keep me").unwrap();
+    let error = Downloader::new(DownloadOptions::new(server.url(), &dest)).unwrap().run().await.unwrap_err();
+    assert!(error.to_string().contains("Content-Range"));
+    assert_eq!(std::fs::read(&dest).unwrap(), b"keep me");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
+async fn failed_single_stream_preserves_existing_output() {
+    let server = start(1024 * 1024, Config { declare_ranges: false, ignore_range: false, truncate_bodies: 100, wrong_range: false }).await;
+    let dir = tmp_dir("single-preserve"); let dest = dir.join("file.bin");
+    std::fs::write(&dest, b"keep me").unwrap();
+    assert!(Downloader::new(DownloadOptions::new(server.url(), &dest)).unwrap().run().await.is_err());
+    assert_eq!(std::fs::read(&dest).unwrap(), b"keep me");
     std::fs::remove_dir_all(dir).ok();
 }

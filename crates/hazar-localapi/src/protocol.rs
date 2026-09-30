@@ -213,6 +213,10 @@ pub enum Outbound {
     Settings {
         settings: Settings,
     },
+    BytesAck {
+        stream_id: String,
+        index: u32,
+    },
     Pong {
         t: u64,
     },

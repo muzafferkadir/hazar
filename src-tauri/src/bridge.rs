@@ -10,19 +10,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use hazar_engine::{download_hls, DownloadOptions, Downloader, HlsOptions, ProgressEvent};
+use hazar_engine::{DownloadOptions, Downloader, HlsOptions, ProgressEvent};
 use hazar_localapi::{
     ClientMessage, GrabKind, GrabRequest, Inbound, LocalApiConfig, Outbound, ServerHandle, Settings,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tauri::Manager;
 use tauri::{AppHandle, Emitter};
 
 pub const QUEUE_EVENT: &str = "capture-event";
 pub const STATUS_EVENT: &str = "capture-status";
-pub const PROGRESS_EVENT: &str = "download-progress";
 const PROGRESS_EMIT: Duration = Duration::from_millis(250);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueEntry {
     pub id: String,
@@ -94,9 +94,73 @@ pub struct CaptureState {
     cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     settings: Arc<Mutex<Settings>>,
     last_emit: Arc<Mutex<HashMap<String, Instant>>>,
+    requests: Mutex<HashMap<String, GrabRequest>>,
+    store: crate::store::Store,
+    paused: Mutex<std::collections::HashSet<String>>,
+    pump_lock: Mutex<()>,
 }
 
 impl CaptureState {
+    pub fn persist(&self) -> Result<(), String> {
+        self.store.save(
+            &self.settings(),
+            &self.queue(),
+            &self.requests.lock().expect("requests"),
+        )
+    }
+
+    pub fn pause(&self, id: &str) -> bool {
+        let _pump_guard = self.pump_lock.lock().expect("pump");
+        if self.drop_pending(id) {
+            self.update(id, |e| e.state = "paused".into());
+            let _ = self.persist();
+            return true;
+        }
+        self.paused.lock().expect("paused").insert(id.into());
+        if self.cancel(id) {
+            true
+        } else {
+            self.paused.lock().expect("paused").remove(id);
+            false
+        }
+    }
+
+    pub fn resume(
+        state: &Arc<Self>,
+        app: &AppHandle,
+        id: &str,
+        url: Option<String>,
+    ) -> Result<(), String> {
+        let entry = state
+            .queue()
+            .into_iter()
+            .find(|e| e.id == id)
+            .ok_or("İndirme bulunamadı")?;
+        if !matches!(
+            entry.state.as_str(),
+            "paused" | "interrupted" | "failed" | "cancelled" | "needs_refresh"
+        ) {
+            return Err("Bu indirme zaten aktif veya tamamlandı".into());
+        }
+        let mut request = state
+            .requests
+            .lock()
+            .expect("requests")
+            .get(id)
+            .cloned()
+            .ok_or("Tarayıcıdan yeniden gönder")?;
+        if let Some(url) = url.filter(|s| !s.trim().is_empty()) {
+            request.url = url;
+        }
+        let parsed = url::Url::parse(&request.url).map_err(|_| "Geçersiz link")?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err("HTTP/HTTPS linki gerekli".into());
+        }
+        state.paused.lock().expect("paused").remove(id);
+        enqueue(state, app, id.into(), request, &entry.source);
+        Ok(())
+    }
+
     pub fn port(&self) -> Option<u16> {
         *self.port.lock().expect("port lock")
     }
@@ -144,7 +208,7 @@ impl CaptureState {
     pub fn drop_pending(&self, id: &str) -> bool {
         let mut pending = self.pending.lock().expect("pending");
         match pending.iter().position(|job| job.id == id) {
-            Some(position) => pending.remove(position).is_some(),
+            Some(position) => { let removed = pending.remove(position).is_some(); self.update(id, |e| e.state = "cancelled".into()); removed },
             None => false,
         }
     }
@@ -171,16 +235,18 @@ impl CaptureState {
             }
             flags.len()
         };
-        for entry in self.queue.lock().expect("queue lock").snapshot() {
-            if entry.state == "queued" || entry.state == "scheduled" || entry.state == "downloading" {
+        for entry in self.queue() {
+            if entry.state == "queued" || entry.state == "scheduled" || entry.state == "downloading"
+            {
                 self.update(&entry.id, |entry| entry.state = "cancelled".into());
             }
         }
         dropped + running
     }
 
-    pub fn set_settings(&self, settings: Settings) {
+    pub fn set_settings(&self, settings: Settings) -> Result<(), String> {
         *self.settings.lock().expect("settings lock") = settings;
+        self.persist()
     }
 
     /// Cancel an in-flight capture (returns false when it already finished).
@@ -206,6 +272,9 @@ impl CaptureState {
     }
 
     fn emit_queue(&self, app: &AppHandle) {
+        if let Err(error) = self.persist() {
+            eprintln!("hazar: state save failed: {error}");
+        }
         let _ = app.emit(QUEUE_EVENT, self.queue());
     }
 
@@ -233,14 +302,7 @@ impl CaptureState {
                 enqueue(state, app, grab.id, grab.request, "extension");
             }
             Inbound::Cancel(cancel) => {
-                let removed = state
-                    .pending
-                    .lock()
-                    .expect("pending")
-                    .iter()
-                    .position(|job| job.id == cancel.id)
-                    .map(|position| state.pending.lock().expect("pending").remove(position).is_some())
-                    .unwrap_or(false);
+                let removed = state.drop_pending(&cancel.id);
                 if removed {
                     state.update(&cancel.id, |entry| entry.state = "cancelled".into());
                     state.emit_queue(app);
@@ -310,7 +372,31 @@ pub(crate) fn enqueue(
     request: GrabRequest,
     source: &str,
 ) {
+    let mut request = request;
+    if state.requests.lock().expect("requests").contains_key(&id)
+        && state.queue().iter().any(|e| {
+            e.id == id && matches!(e.state.as_str(), "queued" | "scheduled" | "downloading")
+        })
+    {
+        return;
+    }
     let settings = state.settings();
+    let existing = state.queue().into_iter().find(|e| e.id == id).and_then(|e| e.path).map(PathBuf::from);
+    let mut dest = existing.unwrap_or_else(|| resolve_dest(&request, &settings));
+    let original = dest.clone();
+    let mut suffix = 1;
+    while state.queue().iter().any(|e| e.id != id && e.path.as_deref() == Some(dest.to_string_lossy().as_ref())) {
+        let stem = original.file_stem().unwrap_or_default().to_string_lossy();
+        let ext = original.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+        dest = original.with_file_name(format!("{stem} ({suffix}){ext}")); suffix += 1;
+    }
+    request.save_dir = dest.parent().map(|p| p.to_string_lossy().into_owned());
+    request.filename = dest.file_name().map(|p| p.to_string_lossy().into_owned());
+    state
+        .requests
+        .lock()
+        .expect("requests")
+        .insert(id.clone(), request.clone());
     let scheduled = !schedule_allows(&settings);
     let kind = match request.kind {
         GrabKind::File => "file",
@@ -318,7 +404,7 @@ pub(crate) fn enqueue(
         GrabKind::Dash => "dash",
     }
     .to_string();
-    let filename = resolve_dest(&request, &settings)
+    let filename = dest
         .file_name()
         .map(|name| name.to_string_lossy().to_string());
 
@@ -328,26 +414,29 @@ pub(crate) fn enqueue(
         .expect("pending")
         .push_back(PendingJob {
             id: id.clone(),
-            request,
+            request: request.clone(),
         });
+    let ack_id = id.clone();
     state.queue.lock().expect("queue lock").upsert(QueueEntry {
         id,
-        url: String::new(),
+        url: request.url.clone(),
         kind,
         state: if scheduled { "scheduled" } else { "queued" }.into(),
         source: source.to_string(),
         written: 0,
         total: 0,
         filename,
-        path: None,
+        path: Some(dest.to_string_lossy().into_owned()),
         error: None,
     });
+    state.broadcast(Outbound::GrabAck { id: ack_id, state: "queued".into(), message: None });
     state.emit_queue(app);
     pump(state, app);
 }
 
 /// Boş slot olduğu ve zamanlama izin verdiği sürece bekleyen işleri başlatır.
 pub(crate) fn pump(state: &Arc<CaptureState>, app: &AppHandle) {
+    let _pump_guard = state.pump_lock.lock().expect("pump");
     loop {
         let settings = state.settings();
         if !schedule_allows(&settings) {
@@ -373,6 +462,7 @@ pub(crate) fn pump(state: &Arc<CaptureState>, app: &AppHandle) {
         });
         state.emit_queue(app);
 
+        state.cancels.lock().expect("cancel lock").insert(job.id.clone(), Arc::new(AtomicBool::new(false)));
         let state = state.clone();
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -394,8 +484,10 @@ fn schedule_allows(settings: &Settings) -> bool {
         let (hours, minutes) = value.split_once(':')?;
         Some(hours.trim().parse::<u32>().ok()? * 60 + minutes.trim().parse::<u32>().ok()?)
     };
-    let (Some(from), Some(to)) = (minutes(&settings.schedule_from), minutes(&settings.schedule_to))
-    else {
+    let (Some(from), Some(to)) = (
+        minutes(&settings.schedule_from),
+        minutes(&settings.schedule_to),
+    ) else {
         return true;
     };
     let now = {
@@ -431,15 +523,39 @@ fn local_offset_seconds() -> i64 {
 
 /// Start the loopback API and wire it to the engine.
 pub fn start(app: AppHandle, settings: Settings) -> Arc<CaptureState> {
+    let store = crate::store::Store::new(app.path().app_data_dir().expect("app data"));
+    let saved = store.load();
+    let settings = saved
+        .as_ref()
+        .map(|s| s.settings.clone())
+        .unwrap_or(settings);
+    let mut queue = Queue::default();
+    let mut requests = HashMap::new();
+    if let Some(saved) = saved {
+        for mut entry in saved.entries {
+            if matches!(
+                entry.state.as_str(),
+                "downloading" | "queued" | "scheduled" | "cancelling"
+            ) {
+                entry.state = "interrupted".into();
+            }
+            queue.upsert(entry);
+        }
+        requests = saved.requests;
+    }
     let state = Arc::new(CaptureState {
         port: Arc::new(Mutex::new(None)),
         server: Arc::new(Mutex::new(None)),
-        queue: Arc::new(Mutex::new(Queue::default())),
+        queue: Arc::new(Mutex::new(queue)),
         pending: Arc::new(Mutex::new(VecDeque::new())),
         running: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         cancels: Arc::new(Mutex::new(HashMap::new())),
         settings: Arc::new(Mutex::new(settings.clone())),
         last_emit: Arc::new(Mutex::new(HashMap::new())),
+        requests: Mutex::new(requests),
+        store,
+        paused: Mutex::new(std::collections::HashSet::new()),
+        pump_lock: Mutex::new(()),
     });
 
     // Zamanlanmış işleri pencere açıldığında başlat.
@@ -488,7 +604,19 @@ type GrabResult = Result<(PathBuf, u64, Option<String>, u64), String>;
 
 async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request: GrabRequest) {
     let settings = state.settings();
-    let dest = resolve_dest(&request, &settings);
+    let dest = state
+        .queue()
+        .into_iter()
+        .find(|e| e.id == id)
+        .and_then(|e| e.path)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| resolve_dest(&request, &settings));
+    let source = state
+        .queue()
+        .into_iter()
+        .find(|e| e.id == id)
+        .map(|e| e.source)
+        .unwrap_or_else(|| "extension".into());
     let kind = match request.kind {
         GrabKind::File => "file",
         GrabKind::Hls => "hls",
@@ -500,21 +628,16 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
         url: request.url.clone(),
         kind: kind.to_string(),
         state: "downloading".into(),
-        source: "extension".into(),
+        source,
         written: 0,
         total: request.size.unwrap_or(0),
         filename: dest.file_name().map(|n| n.to_string_lossy().to_string()),
-        path: None,
+        path: Some(dest.to_string_lossy().into_owned()),
         error: None,
     });
     state.emit_queue(&app);
 
-    let cancel = Arc::new(AtomicBool::new(false));
-    state
-        .cancels
-        .lock()
-        .expect("cancel lock")
-        .insert(id.clone(), cancel.clone());
+    let cancel = state.cancels.lock().expect("cancel lock").get(&id).cloned().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
 
     state.broadcast(Outbound::GrabAck {
         id: id.clone(),
@@ -534,13 +657,44 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
         })
     };
 
-    let headers = request.headers.clone();
+    // Eklenti Referer/Cookie'yi ayrı alanlarda gönderiyor; bunlar header'a
+    // çevrilmezse app oynatıcı oturumu olmadan indirir ve CDN 403 döner
+    // (popup'ta "master-3.ts failed · 403" kaydının sebebi buydu).
+    let headers = capture_headers(
+        &request.headers,
+        request.referer.as_deref(),
+        request.cookie.as_deref(),
+    );
     let user_agent = request.user_agent.clone();
     let connections = request
         .connections
         .map(|value| value as usize)
         .unwrap_or(settings.connections as usize)
         .max(1);
+    // Teşhis: CDN 403'lerinde hangi URL'e hangi başlıklarla gidildiğini göster.
+    // Token/sorgu değerleri log'a yazılmaz (yalnızca path + header isimleri).
+    eprintln!(
+        "hazar: grab {id} kind={kind} url={url_label} segments={segments} referer={referer} cookie={cookie} headers=[{names}]",
+        id = id,
+        kind = kind,
+        url_label = url_label(&request.url),
+        segments = request.segments.as_ref().map(|list| list.len()).unwrap_or(0),
+        referer = request
+            .referer
+            .as_deref()
+            .map(url_label)
+            .unwrap_or_else(|| "-".to_string()),
+        cookie = if request.cookie.as_deref().is_some_and(|c| !c.trim().is_empty()) {
+            "var"
+        } else {
+            "yok"
+        },
+        names = headers
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     let result: GrabResult = match request.kind {
         GrabKind::File => {
             let mut opts = DownloadOptions::new(&request.url, &dest)
@@ -576,10 +730,7 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
         GrabKind::Hls => {
             // Eklenti playlist'i tarayıcıda zaten çektiyse segment listesini kullan:
             // token'lar tek kullanımlık olabiliyor, app manifest'i tekrar isteyince 404 alıyor.
-            let segments = request
-                .segments
-                .clone()
-                .filter(|list| !list.is_empty());
+            let segments = request.segments.clone().filter(|list| !list.is_empty());
             let opts = HlsOptions {
                 manifest: request.url.clone(),
                 segments,
@@ -591,10 +742,10 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
                 connections,
                 user_agent,
                 headers,
-                expected_sha256: None,
+                expected_sha256: request.expected_sha256.clone(),
                 cancel: Some(cancel.clone()),
             };
-            download_hls(opts, Some(tx))
+            hazar_engine::hls::download_hls_captured(opts, request.manifest.as_deref(), Some(tx))
                 .await
                 .map(|outcome| {
                     (
@@ -606,7 +757,28 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
                 })
                 .map_err(|e| e.to_string())
         }
-        GrabKind::Dash => Err("DASH (mpd) indirme henüz yok — yakalama kaydedildi".to_string()),
+        GrabKind::Dash => {
+            let opts = hazar_engine::DashOptions {
+                manifest: request.url.clone(),
+                output: dest.clone(),
+                connections,
+                user_agent,
+                headers,
+                expected_sha256: request.expected_sha256.clone(),
+                cancel: Some(cancel.clone()),
+            };
+            hazar_engine::dash::download_dash_captured(opts, request.manifest.as_deref(), Some(tx))
+                .await
+                .map(|outcome| {
+                    (
+                        outcome.path,
+                        outcome.size,
+                        outcome.sha256,
+                        outcome.elapsed.as_millis() as u64,
+                    )
+                })
+                .map_err(|e| e.to_string())
+        }
     };
 
     let _ = pump.await;
@@ -631,9 +803,16 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
             });
         }
         Err(reason) => {
+            let reason = redact_error(&reason);
+            // Nedeni log'a da yaz (URL zaten engine hatasında var, sorgu değil).
+            eprintln!("hazar: grab {id} failed: {reason}");
             state.update(&id, |entry| {
                 entry.state = if reason.contains("cancelled") {
-                    "cancelled".into()
+                    if state.paused.lock().expect("paused").remove(&id) {
+                        "paused".into()
+                    } else {
+                        "cancelled".into()
+                    }
                 } else {
                     "failed".into()
                 };
@@ -652,8 +831,28 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
 
 /// Tarayıcıdan gelen segment gövdesini diske yazar; son parçada birleştirir.
 fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::Bytes) {
+    if bytes.stream_id.is_empty()
+        || bytes.stream_id.len() > 128
+        || !bytes
+            .stream_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        || bytes.total == 0
+        || bytes.total > 20000
+        || bytes.index >= bytes.total
+        || bytes.data_b64.len() > 24 * 1024 * 1024
+    {
+        state.broadcast(Outbound::Failed {
+            id: bytes.stream_id,
+            reason: "invalid capture chunk".into(),
+        });
+        return;
+    }
     let settings = state.settings();
-    let dir = settings.download_dir.clone().unwrap_or_else(default_download_dir);
+    let dir = settings
+        .download_dir
+        .clone()
+        .unwrap_or_else(default_download_dir);
     let name = bytes
         .filename
         .clone()
@@ -667,18 +866,42 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
         return;
     }
 
+    let descriptor = stream_dir.join("capture.json");
+    let descriptor_value = serde_json::json!({ "total": bytes.total, "name": name });
+    if let Ok(raw) = std::fs::read(&descriptor) {
+        if serde_json::from_slice::<serde_json::Value>(&raw).ok().as_ref() != Some(&descriptor_value) {
+            state.broadcast(Outbound::Failed { id: bytes.stream_id, reason: "capture plan changed".into() }); return;
+        }
+    } else if std::fs::write(&descriptor, descriptor_value.to_string()).is_err() { return; }
+
     let Some(data) = base64_decode(&bytes.data_b64) else {
         eprintln!("hazar: bad base64 chunk for {}", bytes.stream_id);
         return;
     };
     let part = stream_dir.join(format!("part-{:05}.bin", bytes.index));
-    if let Err(error) = std::fs::write(&part, &data) {
+    let duplicate = part.exists();
+    if duplicate && std::fs::read(&part).ok().as_deref() != Some(data.as_slice()) {
+        state.broadcast(Outbound::Failed { id: bytes.stream_id, reason: "capture chunk changed".into() }); return;
+    }
+    let write = || -> std::io::Result<()> {
+        use std::io::Write;
+        let tmp = part.with_extension("partial");
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(&data)?; file.sync_all()?; drop(file);
+        if !duplicate { std::fs::rename(tmp, &part)?; } else { std::fs::remove_file(tmp)?; }
+        Ok(())
+    };
+    if let Err(error) = write() {
         eprintln!("hazar: capture write failed: {error}");
         return;
     }
 
+    state.broadcast(Outbound::BytesAck {
+        stream_id: bytes.stream_id.clone(),
+        index: bytes.index,
+    });
     // Kuyruk girdisi (ilk parçada oluştur).
-    if bytes.index == 0 {
+    if !state.queue().iter().any(|e| e.id == bytes.stream_id) {
         state.queue.lock().expect("queue lock").upsert(QueueEntry {
             id: bytes.stream_id.clone(),
             url: bytes.url.clone().unwrap_or_default(),
@@ -702,7 +925,7 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
         .find(|entry| entry.id == bytes.stream_id)
         .map(|entry| entry.written)
         .unwrap_or(0)
-        + data.len() as u64;
+        + if duplicate { 0 } else { data.len() as u64 };
     state.update(&bytes.stream_id, |entry| entry.written = written);
     state.broadcast(Outbound::Progress {
         id: bytes.stream_id.clone(),
@@ -715,7 +938,7 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
     state.emit_queue(app);
 
     // Son parça geldiyse sırayla birleştir.
-    let done = (bytes.index + 1) >= bytes.total;
+    let done = (0..bytes.total).all(|i| stream_dir.join(format!("part-{i:05}.bin")).exists());
     if !done {
         return;
     }
@@ -752,6 +975,7 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
             }
         }
     }
+    if let Err(error) = out.sync_all() { eprintln!("hazar: capture sync failed: {error}"); return; }
     drop(out);
     if let Err(error) = std::fs::rename(&assembling, &out_path) {
         eprintln!("hazar: assemble rename failed: {error}");
@@ -842,8 +1066,14 @@ pub fn default_download_dir() -> String {
 
 fn name_from_url(url: &str) -> String {
     let path = url.split(['?', '#']).next().unwrap_or(url);
-    let last = path.rsplit('/').find(|s| !s.is_empty()).unwrap_or("download");
+    let last = path
+        .rsplit('/')
+        .find(|s| !s.is_empty())
+        .unwrap_or("download");
     let name = sanitize(last);
+    if name.ends_with(".mpd") {
+        return name.replace(".mpd", ".mp4");
+    }
     if name.ends_with(".m3u8") {
         return name.replace(".m3u8", ".ts");
     }
@@ -876,4 +1106,110 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+fn redact_error(message: &str) -> String {
+    message.split_whitespace().map(|word| {
+        if word.contains("http://") || word.contains("https://") {
+            word.split(['?', '#']).next().unwrap_or(word).to_string()
+        } else { word.to_string() }
+    }).collect::<Vec<_>>().join(" ")
+}
+
+/// Log için URL etiketi: host + path, sorgu/token atılır.
+fn url_label(url: &str) -> String {
+    let without_fragment = url.split('#').next().unwrap_or(url);
+    let without_query = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
+    let trimmed = without_query
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    trimmed.chars().take(120).collect()
+}
+
+/// Engine'e verilecek başlıkları hazırlar: eklentinin yakaladığı başlıklar +
+/// ayrı alanlarda gelen Referer/Cookie. Var olan başlık tekrar eklenmez
+/// (büyük/küçük harf yok sayılır).
+fn capture_headers(
+    headers: &[(String, String)],
+    referer: Option<&str>,
+    cookie: Option<&str>,
+) -> Vec<(String, String)> {
+    let has = |list: &[(String, String)], name: &str| {
+        list.iter().any(|(key, _)| key.eq_ignore_ascii_case(name))
+    };
+
+    let mut out: Vec<(String, String)> = headers.to_vec();
+    if let Some(referer) = referer.filter(|value| !value.trim().is_empty()) {
+        if !has(&out, "referer") {
+            out.push(("Referer".to_string(), referer.to_string()));
+        }
+    }
+    if let Some(cookie) = cookie.filter(|value| !value.trim().is_empty()) {
+        if !has(&out, "cookie") {
+            out.push(("Cookie".to_string(), cookie.to_string()));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_headers_adds_referer_and_cookie() {
+        let out = capture_headers(&[], Some("https://player.example/iframe"), Some("a=1"));
+        assert!(out
+            .iter()
+            .any(|(key, value)| key == "Referer" && value == "https://player.example/iframe"));
+        assert!(out
+            .iter()
+            .any(|(key, value)| key == "Cookie" && value == "a=1"));
+    }
+
+    #[test]
+    fn capture_headers_keeps_captured_headers_and_does_not_duplicate() {
+        let existing = vec![
+            ("referer".to_string(), "https://kept.example".to_string()),
+            ("Cookie".to_string(), "kept=1".to_string()),
+            ("accept".to_string(), "*/*".to_string()),
+        ];
+        let out = capture_headers(&existing, Some("https://other.example"), Some("other=2"));
+        assert!(out
+            .iter()
+            .any(|(key, value)| key == "accept" && value == "*/*"));
+        assert_eq!(
+            out.iter()
+                .filter(|(key, _)| key.eq_ignore_ascii_case("referer"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            out.iter()
+                .filter(|(key, _)| key.eq_ignore_ascii_case("cookie"))
+                .count(),
+            1
+        );
+        assert!(out
+            .iter()
+            .any(|(key, value)| key == "referer" && value == "https://kept.example"));
+    }
+
+    #[test]
+    fn url_label_strips_query_and_fragment() {
+        assert_eq!(
+            url_label("https://four.dplayer82.site/hls/x/seg-1.ts?token=SECRET#frag"),
+            "four.dplayer82.site/hls/x/seg-1.ts"
+        );
+        assert!(!url_label("https://a.example/b?t=1").contains('1'));
+    }
+
+    #[test]
+    fn capture_headers_skips_empty_values() {
+        let out = capture_headers(&[], Some("   "), Some(""));
+        assert!(out.is_empty(), "boş değerler eklenmemeli: {out:?}");
+    }
 }

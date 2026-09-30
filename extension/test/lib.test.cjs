@@ -158,4 +158,55 @@ test("bestVariantFromPlaylist picks the highest bandwidth", () => {
   assert.equal(lib.bestVariantFromPlaylist("#EXTM3U\n#EXTINF:6,\nseg.ts", "https://x/"), null);
 });
 
+test("preferSniffedSegments keeps the player's tokenized URLs", () => {
+  const parsed = ["https://cdn.example/vod/seg0.ts", "https://cdn.example/vod/seg1.ts"];
+  const sniffed = ["https://cdn.example/vod/seg0.ts?t=abc", "https://cdn.example/other/x.ts"];
+  assert.deepEqual(lib.preferSniffedSegments(parsed, sniffed), [
+    "https://cdn.example/vod/seg0.ts?t=abc",
+    "https://cdn.example/vod/seg1.ts?t=abc",
+  ]);
+  assert.deepEqual(lib.preferSniffedSegments(parsed, []), parsed);
+  assert.deepEqual(
+    lib.preferSniffedSegments([...parsed, "https://cdn.example/vod/seg2.ts?x=1"], sniffed),
+    [
+      "https://cdn.example/vod/seg0.ts?t=abc",
+      "https://cdn.example/vod/seg1.ts?t=abc",
+      "https://cdn.example/vod/seg2.ts?x=1",
+    ],
+    "an already-tokenized line keeps its own query",
+  );
+});
+
+test("humanizeError separates segment vs session 403 and drops the retry loop", () => {
+  const seg = lib.humanizeError("segment 1/2: status 403");
+  assert.match(seg, /segment isteğini reddetti/i);
+  assert.doesNotMatch(seg, /tekrar dene/i);
+  const session = lib.humanizeError("status 403");
+  assert.match(session, /403/);
+  assert.doesNotMatch(session, /tekrar dene/i);
+  assert.match(session, /Sayfada indir/);
+  const missing = lib.humanizeError("yakalanmış playlist gövdesi yok; yeniden fetch status 403");
+  assert.match(missing, /playlist yanıtı yakalanmadı/i);
+});
+
+test("statusish gates the byte-tunnel fallback (403/401/timeout only)", () => {
+  assert.equal(lib.statusish("unexpected status 403 for https://cdn.example/s.ts"), true);
+  assert.equal(lib.statusish("segment 2/9: status 403"), true);
+  assert.equal(lib.statusish("unexpected status 401 for https://cdn.example/s.ts"), true);
+  assert.equal(lib.statusish("request timed out"), true);
+  assert.equal(lib.statusish("disk is full"), false);
+  assert.equal(lib.statusish(""), false);
+  assert.equal(lib.statusish(undefined), false);
+});
+
+test("humanizeError shows which url returned 403 (without the query/token)", () => {
+  const raw = "unexpected status 403 for https://cdn.example.xyz/hls/720/seg-3.ts?t=SECRET";
+  const text = lib.humanizeError(raw);
+  assert.match(text, /403/);
+  assert.match(text, /cdn\.example\.xyz\/hls\/720\/seg-3\.ts/, "host+path görünmeli");
+  assert.doesNotMatch(text, /SECRET/, "token sızmamalı");
+  assert.equal(lib.urlLabelOf(raw), "cdn.example.xyz/hls/720/seg-3.ts");
+  assert.equal(lib.urlLabelOf("status 403"), null);
+});
+
 console.log(`\n${passed} test(s) passed`);

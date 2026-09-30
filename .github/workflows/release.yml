@@ -45,8 +45,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Bundle verified FFmpeg
+        run: node scripts/package-media.mjs
+
+      - run: pnpm check
+      - run: pnpm check:extension
+      - run: pnpm test:extension
+
       # Engine tests run before packaging so a broken download never ships.
-      - run: cargo test -p hazar-engine
+      - run: cargo test -p hazar-engine -p hazar-localapi
 
       - name: Stamp the extension version (app version ile aynı)
         if: matrix.platform == 'macos-14'

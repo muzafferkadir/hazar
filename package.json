@@ -1,7 +1,7 @@
 {
   "name": "hazar",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,6 +12,7 @@
     "test:extension": "node extension/test/lib.test.cjs",
     "test:bridge": "node extension/test/bridge.test.cjs",
     "package:extension": "bash scripts/package-extension.sh",
+    "bump": "bash scripts/bump-version.sh",
     "check:extension": "node --check extension/src/background.js && node --check extension/src/content.js && node --check extension/src/popup.js && node --check extension/src/options.js && node --check extension/page-hook.js && node --check extension/recapture.js",
     "tauri": "tauri",
     "test:matrix": "cargo run -q -p hazar-testmatrix",

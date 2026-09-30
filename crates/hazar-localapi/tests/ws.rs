@@ -203,3 +203,19 @@ async fn falls_back_to_the_next_free_port() {
     a.shutdown();
     b.shutdown();
 }
+
+#[tokio::test]
+async fn refuses_web_page_origin_and_missing_session() {
+    let (handle, mut inbound) = hazar_localapi::server::start(LocalApiConfig { ports: vec![0], ..Default::default() }).await.unwrap();
+    let mut request = format!("ws://127.0.0.1:{}/hazar", handle.port).into_client_request().unwrap();
+    request.headers_mut().insert("Sec-WebSocket-Protocol", HeaderValue::from_static(SUBPROTOCOL));
+    request.headers_mut().insert("Origin", HeaderValue::from_static("https://attacker.example"));
+    assert!(connect_async(request).await.is_err());
+    let mut ws = connect(handle.port, true).await.unwrap();
+    send(&mut ws, &serde_json::json!({"type":"hello", "protocol":1, "client":"test"})).await;
+    let _: Outbound = recv(&mut ws).await;
+    send(&mut ws, &serde_json::json!({"type":"cancel", "id":"victim"})).await;
+    assert!(matches!(recv::<Outbound>(&mut ws).await, Outbound::Error { .. }));
+    assert!(inbound.try_recv().is_err());
+    handle.shutdown();
+}

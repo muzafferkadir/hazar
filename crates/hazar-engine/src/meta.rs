@@ -70,7 +70,13 @@ impl DownloadMeta {
         if self.version != META_VERSION {
             return false;
         }
-        if self.final_url != info.final_url || self.size != size {
+        if self.size != size
+            || (self.final_url != info.final_url
+                && !(self
+                    .etag
+                    .as_ref()
+                    .is_some_and(|e| !e.starts_with("W/") && Some(e) == info.etag.as_ref())))
+        {
             return false;
         }
         // Strong validators: if the server gave one before, it must match now.

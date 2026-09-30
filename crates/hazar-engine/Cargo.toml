@@ -22,5 +22,7 @@ aes = { workspace = true }
 cbc = { workspace = true }
 url = { workspace = true }
 
+roxmltree = "0.20"
+
 [dev-dependencies]
 reqwest = { workspace = true }

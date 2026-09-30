@@ -45,6 +45,30 @@ pub fn plan_parts(size: u64, opts: PlanOptions) -> Vec<PartState> {
     parts
 }
 
+/// More ranges than workers keeps fast workers busy without changing active ranges.
+/// A bounded plan avoids one task per range and limits resume metadata size.
+pub fn plan_work(size: u64, opts: PlanOptions) -> Vec<PartState> {
+    if size == 0 {
+        return Vec::new();
+    }
+    let workers = opts.connections.clamp(1, MAX_CONNECTIONS);
+    let chunk = (size / (workers as u64 * 4)).max(opts.min_part_size.max(1));
+    let count = size.div_ceil(chunk).min(4096);
+    let chunk = size.div_ceil(count);
+    (0..count)
+        .map(|index| {
+            let start = index * chunk;
+            PartState {
+                index: index as u32,
+                start,
+                end: (start + chunk).min(size) - 1,
+                written: 0,
+            }
+        })
+        .filter(|p| p.start < size)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

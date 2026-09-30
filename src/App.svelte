@@ -1,572 +1,122 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
-  import { open as openFolder, save } from '@tauri-apps/plugin-dialog'
+  import { open as chooseFolder } from '@tauri-apps/plugin-dialog'
+  import { revealItemInDir } from '@tauri-apps/plugin-opener'
+  import { check } from '@tauri-apps/plugin-updater'
+  import { relaunch } from '@tauri-apps/plugin-process'
 
-  interface ProbeInfo {
-    requested_url: string
-    final_url: string
-    len: number | null
-    accept_ranges: boolean
-    etag: string | null
-    last_modified: string | null
-    content_type: string | null
-    filename_hint: string | null
-  }
-
-  type Progress =
-    | { kind: 'probing'; url: string }
-    | { kind: 'planned'; size: number; connections: number; resumed: boolean; bytes_done: number }
-    | { kind: 'part_progress'; index: number; part_written: number; part_length: number; total_written: number; total_size: number }
-    | { kind: 'hls_planned'; segments: number; variant: string | null; resumed: boolean; done: number }
-    | { kind: 'hls_segment'; done: number; total: number; bytes: number }
-    | { kind: 'retrying'; index: number; attempt: number; reason: string }
-    | { kind: 'falldown_single'; reason: string }
-    | { kind: 'assembling'; parts: number }
-    | { kind: 'verifying' }
-    | { kind: 'finished'; bytes: number; elapsed_ms: number; sha256: string | null }
-    | { kind: 'failed'; reason: string }
-
-  interface Outcome {
-    path: string
-    size: number
-    sha256: string | null
-    connections: number
-    resumed: boolean
-    elapsedMs: number
-  }
-
-  interface CaptureStatus {
-    listening: boolean
-    port: number | null
-    extensionClients: number
-    captured: number
-    downloadDir: string
-  }
-
-  interface QueueEntry {
-    id: string
-    url: string
-    kind: string
-    state: string
-    source: string
-    written: number
-    total: number
-    filename: string | null
-    path: string | null
-    error: string | null
-  }
-
+  type Job = { id: string; url: string; filename: string | null; state: string; written: number; total: number; path: string | null; error: string | null }
+  type Settings = { download_dir: string | null; connections: number; max_concurrent_downloads: number; capture_enabled: boolean; min_size_bytes: number; excluded_hosts: string[]; schedule_enabled: boolean; schedule_from: string; schedule_to: string }
+  type Status = { extensionClients: number; downloadDir: string }
+  let jobs = $state<Job[]>([])
+  let settings = $state<Settings | null>(null)
+  let status = $state<Status | null>(null)
   let url = $state('')
-  let dest = $state('')
-  let connections = $state(8)
-  let sha = $state('')
-  let speedLimit = $state(0)
-  let appSettings = $state<Record<string, unknown> | null>(null)
-  let extensionDir = $state<string | null>(null)
-  let info = $state<ProbeInfo | null>(null)
-  let written = $state(0)
-  let total = $state(0)
-  let speed = $state(0)
-  let phase = $state<'idle' | 'probing' | 'download' | 'assembling' | 'verifying' | 'done' | 'error'>('idle')
-  let log = $state<string[]>([])
-  let busy = $state(false)
-
-  let status = $state<CaptureStatus | null>(null)
-  let queue = $state<QueueEntry[]>([])
-
-  let lastBytes = 0
-  let lastAt = Date.now()
-
-  const percent = $derived(total > 0 ? Math.min(100, (written / total) * 100) : 0)
-  const captured = $derived(queue.filter((entry) => entry.source === 'extension'))
-
-  const human = (bytes: number) => {
-    const units = ['B', 'KB', 'MB', 'GB', 'TB']
-    let value = bytes || 0
-    let unit = 0
-    while (value >= 1024 && unit < units.length - 1) {
-      value /= 1024
-      unit += 1
-    }
-    return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`
+  let message = $state('')
+  let adding = $state(false)
+  let showSettings = $state(false)
+  let version = $state('')
+  let updating = $state(false)
+  let refreshId = $state('')
+  let refreshUrl = $state('')
+  const labels: Record<string, string> = { queued: 'Bekliyor', scheduled: 'Zamanlandı', downloading: 'İndiriliyor', paused: 'Duraklatıldı', interrupted: 'Yarım kaldı', cancelled: 'İptal edildi', cancelling: 'Durduruluyor', failed: 'Başarısız', done: 'Tamamlandı', needs_refresh: 'Yeni link gerekli' }
+  const active = (job: Job) => ['queued', 'scheduled', 'downloading'].includes(job.state)
+  const resumable = (job: Job) => ['paused', 'interrupted', 'cancelled', 'failed', 'needs_refresh'].includes(job.state)
+  const size = (value: number) => {
+    const units = ['B', 'KB', 'MB', 'GB']; let index = 0
+    while (value >= 1024 && index < units.length - 1) { value /= 1024; index++ }
+    return `${value.toFixed(index ? 1 : 0)} ${units[index]}`
   }
-
-  const ratio = (entry: QueueEntry) =>
-    entry.total > 0 ? Math.min(100, (entry.written / entry.total) * 100) : 0
-
-  function note(line: string) {
-    log = [...log.slice(-200), line]
+  const percent = (job: Job) => job.total > 0 ? Math.min(100, job.written / job.total * 100) : 0
+  async function refresh() {
+    [jobs, status] = await Promise.all([invoke<Job[]>('capture_queue'), invoke<Status>('capture_status')])
   }
-
-  async function refreshCapture() {
+  async function action(command: string, args?: Record<string, unknown>) {
+    message = ''
+    try { await invoke(command, args); await refresh() } catch (error) { message = String(error) }
+  }
+  async function add() {
+    if (adding || !url.trim()) return
     try {
-      status = await invoke<CaptureStatus>('capture_status')
-      queue = await invoke<QueueEntry[]>('capture_queue')
-      if (!appSettings) appSettings = await invoke<Record<string, unknown>>('capture_settings_get')
-      if (!extensionDir) {
-        extensionDir = await invoke<string>('extension_path').catch(() => null)
-      }
-    } catch (error) {
-      console.error('capture status failed', error)
-    }
+      const parsed = new URL(url.trim())
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('HTTP/HTTPS linki gerekli')
+      adding = true; message = ''
+      await invoke('queue_add', { url: parsed.href, dest: '', connections: null, sha256: null, speedLimitMbps: null })
+      url = ''; await refresh()
+    } catch (error) { message = String(error) } finally { adding = false }
   }
-
-  async function saveSettings(patch: Record<string, unknown>) {
-    if (!appSettings) appSettings = await invoke<Record<string, unknown>>('capture_settings_get')
-    appSettings = { ...appSettings, ...patch }
-    appSettings = await invoke<Record<string, unknown>>('capture_settings_set', { settings: appSettings })
-    note('ayarlar kaydedildi')
+  async function save(patch: Partial<Settings>) {
+    if (!settings) return
+    try { settings = await invoke<Settings>('capture_settings_set', { settings: { ...settings, ...patch } }); await refresh() }
+    catch (error) { message = String(error) }
   }
-
+  async function folder() {
+    const path = await chooseFolder({ directory: true, multiple: false })
+    if (typeof path === 'string') await save({ download_dir: path })
+  }
   async function exportExtension() {
-    try {
-      const picked = await openFolder({
-        directory: true,
-        multiple: false,
-        title: 'Eklentiyi kaydetmek için klasör seç',
-      })
-      if (typeof picked !== 'string') return
-      const path = await invoke<string>('extension_export', { destDir: picked })
-      extensionDir = path
-      note(`eklenti kopyalandı: ${path}`)
-    } catch (error) {
-      note(`kopyalanamadı: ${error}`)
-    }
+    const path = await chooseFolder({ directory: true, multiple: false, title: 'Eklentiyi kaydet' })
+    if (typeof path === 'string') await action('extension_export', { destDir: path })
   }
-
-  /** Ham motor hatalarını kullanıcıya anlaşılır cümleye çevirir. */
-  function humanize(message: string) {
-    if (/403/.test(message)) {
-      return `bu bağlantı yalnızca oynatıcı oturumunda geçerli — videoyu oynatıp eklenti popup'ından "Segmentleri indir" seçeneğini kullan`
-    }
-    if (/404/.test(message) && /(\.m3u8|\.mpd|l\.php)/.test(message)) {
-      return 'stream bağlantısının süresi dolmuş (oynatıcı token\'ı) — tarayıcıda videoyu yeniden başlatıp tekrar gönder'
-    }
-    if (/not an HLS playlist/.test(message)) {
-      return 'stream tarayıcıda şifreli çözülüyor (client-side) — indirilemiyor'
-    }
-    if (/SAMPLE-AES|widevine|playready/i.test(message)) return 'DRM korumalı — indirilemiyor'
-    if (/timed out|timeout/i.test(message)) return `zaman aşımı: ${message}`
-    return message
+  async function update() {
+    updating = true; message = ''
+    try { const release = await check(); if (release) { await release.downloadAndInstall(); await relaunch() } else message = 'Güncel versiyon kurulu.' }
+    catch (error) { message = String(error) } finally { updating = false }
   }
-
-  async function revealExtension() {
-    try {
-      const path = await invoke<string>('extension_reveal')
-      note(`eklenti klasörü açıldı: ${path}`)
-    } catch (error) {
-      note(`klasör açılamadı: ${error}`)
+  onMount(() => {
+    let disposed = false
+    const unlisteners: (() => void)[] = []
+    void Promise.all([invoke<Settings>('capture_settings_get'), invoke<string>('engine_version')]).then(([s, v]) => { if (!disposed) { settings = s; version = v } }).catch(e => message = String(e))
+    for (const event of ['capture-event', 'capture-status']) {
+      void listen(event, () => { void refresh().catch(e => message = String(e)) }).then(unlisten => { if (disposed) unlisten(); else unlisteners.push(unlisten) })
     }
-  }
-
-  async function copyExtensionPath() {
-    if (!extensionDir) return
-    try {
-      await navigator.clipboard.writeText(extensionDir)
-      note('eklenti klasörü yolu kopyalandı')
-    } catch (error) {
-      note(`kopyalanamadı: ${error}`)
-    }
-  }
-
-  async function cancelAll() {
-    const dropped = await invoke<number>('capture_cancel_all')
-    note(`${dropped} iş iptal edildi`)
-    await refreshCapture()
-  }
-
-  async function cancelCapture(id: string) {
-    await invoke('capture_cancel', { id })
-    await refreshCapture()
-  }
-
-  async function onProbe() {
-    if (!url) return
-    phase = 'probing'
-    info = null
-    try {
-      const result = await invoke<ProbeInfo>('engine_probe', { url })
-      info = result
-      if (!dest && result.filename_hint) dest = result.filename_hint
-      note(`probe: ${result.len ?? '?'} bytes, ranges=${result.accept_ranges ? 'yes' : 'no'}`)
-    } catch (error) {
-      note(`probe failed: ${error}`)
-    } finally {
-      phase = 'idle'
-    }
-  }
-
-  async function pickDest() {
-    const picked = await save({ defaultPath: dest || undefined })
-    if (typeof picked === 'string') dest = picked
-  }
-
-  async function start() {
-    if (!url || !dest || busy) return
-    busy = true
-    written = 0
-    total = 0
-    speed = 0
-    phase = 'download'
-    try {
-      // Kuyruğa ekle: ilerleme, iptal ve zamanlama aynı yoldan işler.
-      const id = await invoke<string>('queue_add', {
-        url,
-        dest,
-        connections,
-        sha256: sha.trim() ? sha.trim() : null,
-        speedLimitMbps: speedLimit > 0 ? speedLimit : null,
-      })
-      phase = 'done'
-      note(`kuyruğa eklendi: ${id}`)
-      await refreshCapture()
-    } catch (error) {
-      phase = 'error'
-      note(`failed: ${error}`)
-    } finally {
-      busy = false
-    }
-  }
-
-  $effect(() => {
-    const pending = listen<Progress>('download-progress', (event) => {
-      const ev = event.payload
-      switch (ev.kind) {
-        case 'planned':
-          total = ev.size
-          written = ev.bytes_done
-          lastBytes = ev.bytes_done
-          lastAt = Date.now()
-          note(ev.resumed ? `resuming with ${ev.connections} parts` : `starting: ${human(ev.size)} in ${ev.connections} parts`)
-          break
-        case 'part_progress': {
-          const now = Date.now()
-          if (now - lastAt > 250) {
-            speed = (ev.total_written - lastBytes) / ((now - lastAt) / 1000)
-            lastBytes = ev.total_written
-            lastAt = now
-          }
-          total = ev.total_size || total
-          written = ev.total_written
-          break
-        }
-        case 'hls_planned':
-          phase = 'download'
-          note(`hls: ${ev.segments} segments${ev.variant ? ` · ${ev.variant}` : ''}`)
-          break
-        case 'hls_segment':
-          total = ev.total
-          written = ev.done
-          note(`segments ${ev.done}/${ev.total} · ${human(ev.bytes)}`)
-          break
-        case 'falldown_single':
-          note(`single connection: ${ev.reason}`)
-          break
-        case 'retrying':
-          note(`retry ${ev.attempt} on part ${ev.index}: ${ev.reason}`)
-          break
-        case 'assembling':
-          phase = 'assembling'
-          note(`assembling ${ev.parts} parts`)
-          break
-        case 'verifying':
-          phase = 'verifying'
-          note('verifying checksum')
-          break
-        case 'finished':
-          note(`finished in ${(ev.elapsed_ms / 1000).toFixed(1)}s`)
-          break
-        case 'failed':
-          note(`failed: ${ev.reason}`)
-          break
-      }
-    })
-    return () => {
-      pending.then((unlisten) => unlisten())
-    }
-  })
-
-  $effect(() => {
-    const statusEvents = listen<CaptureStatus>('capture-status', (event) => {
-      status = event.payload
-    })
-    const queueEvents = listen<QueueEntry[]>('capture-event', (event) => {
-      queue = event.payload
-    })
-    const timer = setInterval(refreshCapture, 2500)
-    refreshCapture()
-    return () => {
-      clearInterval(timer)
-      statusEvents.then((unlisten) => unlisten())
-      queueEvents.then((unlisten) => unlisten())
-    }
+    void refresh().catch(e => message = String(e))
+    const timer = setInterval(() => { void refresh().catch(() => {}) }, 2000)
+    return () => { disposed = true; clearInterval(timer); unlisteners.forEach(fn => fn()) }
   })
 </script>
 
-<div class="app-wrapper">
-  <header class="header">
-    <div class="brand">
-      <div class="logo-badge">H</div>
-      <div class="brand-text">
-        <h1>Hazar</h1>
-        <p>multi-connection download engine</p>
-      </div>
-    </div>
-    <div class="capture-pill" class:on={status?.extensionClients}>
-      {#if status?.port}
-        {status.extensionClients > 0 ? `extension bağlı · :${status.port}` : `köprü hazır · :${status.port}`}
-      {:else}
-        köprü başlatılıyor…
-      {/if}
-    </div>
+<main>
+  <header data-tauri-drag-region>
+    <div><h1>Hazar <span>{version}</span></h1><p>İndirmelerin tek yerde.</p></div>
+    <button class:chosen={showSettings} onclick={() => showSettings = !showSettings}>Ayarlar</button>
   </header>
-
-  <main class="main-content">
-    <section class="card">
-      <div class="form-group">
-        <label class="form-label" for="url">URL</label>
-        <div class="input-group">
-          <input id="url" class="file-input" bind:value={url} placeholder="https://example.com/big.iso · .m3u8" />
-          <button class="browse-btn" onclick={onProbe} disabled={busy || !url}>Probe</button>
-        </div>
-        <p class="field-hint">
-          {#if info}
-            {human(info.len ?? 0)} · range requests {info.accept_ranges ? 'supported' : 'not supported'} · {info.content_type ?? 'unknown type'}
-          {:else}
-            HEAD + ranged GET probe, ya da .m3u8 girip HLS indir
-          {/if}
-        </p>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="dest">Save as</label>
-        <div class="input-group">
-          <input id="dest" class="file-input" bind:value={dest} placeholder="choose a destination" />
-          <button class="browse-btn" onclick={pickDest} disabled={busy}>Browse</button>
-        </div>
-      </div>
-
-      <div class="content-grid">
-        <div class="form-group">
-          <label class="form-label" for="connections">Connections</label>
-          <input id="connections" class="file-input" type="number" min="1" max="16" bind:value={connections} disabled={busy} />
-          <p class="field-hint">1–16, default 8.</p>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="sha">Verify SHA-256 (optional)</label>
-          <input id="sha" class="file-input" bind:value={sha} placeholder="hex digest" disabled={busy} />
-          <p class="field-hint">Uyuşmazsa indirme hata verir.</p>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="speed">Hız limiti (MB/s)</label>
-          <input id="speed" class="file-input" type="number" min="0" step="0.5" bind:value={speedLimit} disabled={busy} />
-          <p class="field-hint">0 = sınırsız. Tüm connection'lar toplam bu hızı aşmaz.</p>
-        </div>
-      </div>
-
-      <div class="button-group">
-        <button class="browse-btn" onclick={start} disabled={busy || !url || !dest}>
-          {busy ? 'Ekleniyor…' : 'Kuyruğa ekle'}
-        </button>
-        <button class="browse-btn" onclick={cancelAll}>Tümünü iptal</button>
-      </div>
-
-      {#if phase !== 'idle' || total > 0}
-        <div class="progress">
-          <div class="progress-bar" style={`width: ${percent}%`}></div>
-        </div>
-        <p class="field-hint">
-          {phase} · {human(written)}{total > 0 ? ` / ${human(total)}` : ''} · {percent.toFixed(1)}%
-          {#if speed > 0} · {human(speed)}/s{/if}
-        </p>
-      {/if}
+  <form class="add" onsubmit={(event) => { event.preventDefault(); void add() }}>
+    <label class="sr-only" for="url">Download linki</label>
+    <input id="url" type="url" bind:value={url} placeholder="Download linkini yapıştır" required autocomplete="off" />
+    <button class="primary" disabled={adding || !url.trim()}>{adding ? 'Ekleniyor…' : 'İndir'}</button>
+  </form>
+  {#if message}<p class="notice" role="status">{message}</p>{/if}
+  {#if showSettings && settings}
+    <section class="settings" aria-label="Ayarlar">
+      <div class="setting"><div><strong>Download klasörü</strong><p>{settings.download_dir ?? status?.downloadDir ?? 'Downloads'}</p></div><button onclick={folder}>Değiştir</button></div>
+      <div class="setting"><label for="concurrent">Aynı anda indir</label><select id="concurrent" value={settings.max_concurrent_downloads} onchange={(e) => save({ max_concurrent_downloads: Number(e.currentTarget.value) })}>{#each [1, 2, 3, 4] as count}<option value={count}>{count} dosya</option>{/each}</select></div>
+      <div class="setting"><label for="capture">Tarayıcı indirmelerini yakala</label><input id="capture" type="checkbox" checked={settings.capture_enabled} onchange={(e) => save({ capture_enabled: e.currentTarget.checked })} /></div>
+      <div class="setting"><div><strong>Tarayıcı eklentisi</strong><p>{status?.extensionClients ? 'Bağlı' : 'Bağlı değil'} · Chrome / Edge / Firefox</p></div><button onclick={exportExtension}>Eklentiyi kaydet</button></div>
+      <p class="hint">Chrome/Edge: Extensions → Developer mode → Load unpacked. Kaydedilen klasörü seç.</p>
+      <div class="setting"><span>Hazar {version}</span><button disabled={updating} onclick={update}>{updating ? 'Güncelleniyor…' : 'Update kontrol et'}</button></div>
     </section>
-
-    <section class="card">
-      <div class="form-group">
-        <div class="form-label">Tarayıcı eklentisi (unpacked)</div>
-        <p class="field-hint">
-          Store'da yayınlanmıyor; eklenti klasörü uygulamayla birlikte gelir:
-        </p>
-        <p class="path selectable">{extensionDir ?? 'bulunamadı'}</p>
-        <div class="button-group">
-          <button class="browse-btn primary" onclick={exportExtension}>Extension'ı indir…</button>
-          <button class="browse-btn" onclick={revealExtension} disabled={!extensionDir}>Klasörü göster</button>
-          <button class="browse-btn" onclick={copyExtensionPath} disabled={!extensionDir}>Yolu kopyala</button>
-        </div>
-        <p class="field-hint">
-          <b>Chrome / Edge:</b> <code>chrome://extensions</code> → Geliştirici modu aç →
-          “Paketlenmemiş öğe yükle” → bu klasörü seç.<br />
-          <b>Firefox:</b> <code>about:debugging</code> → “Geçici Eklenti Yükle” → klasördeki
-          <code>manifest.json</code>. Eklenti popup'ında “bağlı · :8722” görünmeli.
-        </p>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="form-group">
-        <label class="form-label" for="schedule">Gece indirme penceresi</label>
-        <div class="content-grid">
-          <div class="input-group">
-            <input
-              id="schedule"
-              type="checkbox"
-              checked={Boolean(appSettings?.schedule_enabled)}
-              onchange={(event) => saveSettings({ schedule_enabled: event.currentTarget.checked })}
-            />
-            <span class="field-hint">kapalıysa hep indirir</span>
-          </div>
-          <div class="input-group">
-            <input
-              class="file-input"
-              value={String(appSettings?.schedule_from ?? '02:00')}
-              onchange={(event) => saveSettings({ schedule_from: event.currentTarget.value })}
-            />
-            <span class="field-hint">–</span>
-            <input
-              class="file-input"
-              value={String(appSettings?.schedule_to ?? '08:00')}
-              onchange={(event) => saveSettings({ schedule_to: event.currentTarget.value })}
-            />
-          </div>
-        </div>
-        <p class="field-hint">
-          Kuyruk bu pencerenin dışında "scheduled" kalır; pencere açılınca otomatik başlar
-          (max eşzamanlı: {String(appSettings?.max_concurrent_downloads ?? 3)}).
-        </p>
-      </div>
-
-      <div class="form-group">
-        <div class="form-label">Kuyruk ({queue.length}) — yakalanan: {captured.length}</div>
-        <p class="field-hint">Klasör: {status?.downloadDir ?? '—'}</p>
-      </div>
-
-      {#if captured.length === 0}
-        <p class="field-hint">Henüz yakalanan indirme yok. Extension'ı yükleyip bir indirme başlat.</p>
-      {:else}
-        {#each captured.slice(-8).reverse() as entry (entry.id)}
-          <div class="queue-row">
-            <div class="queue-main">
-              <div class="queue-title">
-                <span class="queue-kind">{entry.kind}</span>
-                {entry.filename ?? entry.url}
-              </div>
-              <div class="progress small">
-                <div class="progress-bar" style={`width: ${ratio(entry)}%`}></div>
-              </div>
-              <p class="field-hint">
-                {entry.state}{entry.total > 0 ? ` · ${human(entry.written)} / ${human(entry.total)}` : ''}
-                {#if entry.error} · {humanize(entry.error)}{/if}
-              </p>
-            </div>
-            {#if entry.state === 'downloading' || entry.state === 'queued'}
-              <button class="browse-btn" onclick={() => cancelCapture(entry.id)}>İptal</button>
-            {/if}
-          </div>
-        {/each}
-      {/if}
-    </section>
-
-    {#if log.length}
-      <section class="log-section">
-        <div class="log-container">
-          {#each log as line}
-            <div class="log-line">{line}</div>
-          {/each}
-        </div>
-      </section>
+  {/if}
+  <section class="downloads" aria-label="İndirmeler">
+    <div class="list-title"><h2>İndirmeler</h2><span>{jobs.filter(active).length} aktif</span></div>
+    {#if !jobs.length}
+      <div class="empty"><h3>İlk download’unu ekle.</h3><p>Bir link yapıştır veya tarayıcı eklentisinden gönder.</p></div>
     {/if}
-  </main>
-</div>
-
-<style>
-  .progress {
-    height: 6px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
-    overflow: hidden;
-    margin-top: 14px;
-  }
-
-  .progress.small {
-    margin-top: 6px;
-    height: 4px;
-  }
-
-  .progress-bar {
-    height: 100%;
-    background: var(--accent);
-    transition: width 0.2s ease;
-  }
-
-  .log-line {
-    font-family: var(--mono);
-    font-size: 11px;
-    line-height: 1.6;
-    color: var(--text-2);
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
-
-  .path.selectable {
-    user-select: text;
-    -webkit-user-select: text;
-    cursor: text;
-  }
-
-  .path {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--text-2);
-    background: rgba(0, 0, 0, 0.22);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 8px;
-    word-break: break-all;
-    margin: 4px 0 8px;
-  }
-
-  .capture-pill {
-    font-size: 11px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    color: var(--text-2);
-  }
-
-  .capture-pill.on {
-    color: var(--text);
-    border-color: var(--accent);
-  }
-
-  .queue-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 0;
-    border-top: 1px solid var(--separator);
-  }
-
-  .queue-main {
-    min-width: 0;
-    flex: 1;
-  }
-
-  .queue-title {
-    font-size: 12px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .queue-kind {
-    display: inline-block;
-    font-size: 10px;
-    padding: 1px 6px;
-    margin-right: 6px;
-    border-radius: 4px;
-    background: rgba(99, 102, 241, 0.18);
-    color: #a5b4fc;
-  }
-</style>
+    {#each [...jobs].reverse() as job (job.id)}
+      <article class="job">
+        <div class="job-heading"><strong title={job.filename ?? ''}>{job.filename ?? 'Download'}</strong><span class:done={job.state === 'done'}>{labels[job.state] ?? job.state}</span></div>
+        {#if active(job)}<progress max="100" value={job.total > 0 ? percent(job) : undefined} aria-label="Download ilerlemesi"></progress>{/if}
+        <div class="job-footer"><span>{size(job.written)}{job.total > 0 ? ` / ${size(job.total)}` : ''}</span><div class="actions">
+          {#if active(job)}<button onclick={() => action('queue_pause', { id: job.id })}>Duraklat</button>{/if}
+          {#if resumable(job)}<button onclick={() => action('queue_resume', { id: job.id, url: null })}>Devam et</button><button onclick={() => { refreshId = job.id; refreshUrl = '' }}>Link yenile</button>{/if}
+          {#if job.state === 'done' && job.path}<button onclick={() => { void revealItemInDir(job.path!).catch(e => message = String(e)) }}>Klasörde göster</button>{/if}
+        </div></div>
+        {#if job.error && job.state !== 'paused'}<p class="error">{job.error}</p>{/if}
+        {#if refreshId === job.id}<form class="refresh" onsubmit={(e) => { e.preventDefault(); void action('queue_resume', { id: job.id, url: refreshUrl }).then(() => refreshId = '') }}><input type="url" bind:value={refreshUrl} placeholder="Yeni download linki" required aria-label="Yeni download linki" /><button>Devam et</button><button type="button" onclick={() => refreshId = ''}>Vazgeç</button></form>{/if}
+      </article>
+    {/each}
+  </section>
+  <footer><span class:connected={!!status?.extensionClients}>●</span> Tarayıcı {status?.extensionClients ? 'bağlı' : 'bağlı değil'}</footer>
+</main>

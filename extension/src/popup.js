@@ -10,20 +10,9 @@ const send = (message) =>
     }
   });
 
-/** Ham motor hatalarını kullanıcıya anlaşılır cümleye çevirir (app ile aynı mantık). */
+/** Ham motor hatalarını kullanıcıya anlaşılır cümleye çevirir (lib.js ile ortak). */
 function humanize(message) {
-  if (/403/.test(message)) {
-    return "bu bağlantı yalnızca oynatıcı oturumunda geçerli — popup'ta \"Segmentleri indir\" çıkması gerekir; videoyu oynatıp tekrar dene";
-  }
-  if (/404/.test(message) && /(\.m3u8|\.mpd|l\.php)/.test(message)) {
-    return "bağlantının süresi dolmuş (oynatıcı tek kullanımlık token) — videoyu oynatıp tekrar gönder";
-  }
-  if (/not an HLS playlist/.test(message)) {
-    return "stream tarayıcıda şifreli çözülüyor — indirilemiyor";
-  }
-  if (/SAMPLE-AES|widevine|playready/i.test(message)) return "DRM korumalı — indirilemiyor";
-  if (/timed out|timeout/i.test(message)) return "zaman aşımı";
-  return message;
+  return HazarLib.humanizeError(message);
 }
 
 function humanBytes(bytes) {
@@ -109,7 +98,9 @@ async function renderCandidates() {
       candidate.isManifest ? "playlist" : null,
       encrypted ? "tarayıcıda şifreli" : null,
       expired ? "bağlantı süresi dolmuş" : null,
-      segments.length ? `${segments.length} segment` : null,
+      segments.length
+        ? `${segments.length} ${candidate.isMaster ? "varyant" : "segment"}`
+        : null,
     ]
       .filter(Boolean)
       .join(" · ");
@@ -125,8 +116,9 @@ async function renderCandidates() {
     if (!sendable) button.disabled = true;
 
     // Segmentler elimizdeyse oynatıcının oturumunda indirip app'e aktarırız.
+    const downloadLabel = candidate.isMaster ? `${segments.length} varyant` : `${segments.length} segment`;
     const frameButton = segments.length
-      ? el("button", { className: "primary", textContent: `Sayfada indir (${segments.length})` })
+      ? el("button", { className: "primary", textContent: `Sayfada indir (${downloadLabel})` })
       : null;
     if (frameButton) {
       frameButton.addEventListener("click", async () => {
@@ -140,10 +132,12 @@ async function renderCandidates() {
           segments,
           filename: candidate.filename || "stream.ts",
         });
-        frameButton.textContent = result.ok ? `aktarıldı (${segments.length})` : "başarısız";
+        frameButton.textContent = result.ok
+          ? `aktarıldı (${result.segments ?? segments.length} segment)`
+          : "başarısız";
         if (!result.ok) {
           frameButton.disabled = false;
-          frameButton.textContent = `Sayfada indir (${segments.length})`;
+          frameButton.textContent = `Sayfada indir (${downloadLabel})`;
         }
         setTimeout(renderRecent, 500);
       });

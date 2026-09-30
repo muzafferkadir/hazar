@@ -1,8 +1,7 @@
 //! HLS (m3u8) support: playlist parsing (master + media), AES-128 decryption,
 //! concurrent segment download with resume, and ordered assembly.
 //!
-//! DASH (`mpd`) is detected by the extension/app but not downloaded yet — see
-//! [`is_dash`].
+//! Captured playlists preserve encryption, byte ranges and init segments.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -60,13 +59,7 @@ pub fn is_dash(url: &str, mime: Option<&str>) -> bool {
 }
 
 fn media_type(mime: Option<&str>) -> Option<String> {
-    mime.map(|m| {
-        m.split(';')
-            .next()
-            .unwrap_or(m)
-            .trim()
-            .to_ascii_lowercase()
-    })
+    mime.map(|m| m.split(';').next().unwrap_or(m).trim().to_ascii_lowercase())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -255,7 +248,10 @@ fn attr(input: &str, name: &str) -> Option<String> {
 }
 
 fn parse_iv(value: &str) -> Option<[u8; 16]> {
-    let hex = value.trim().trim_start_matches("0x").trim_start_matches("0X");
+    let hex = value
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
     if hex.len() != 32 {
         return None;
     }
@@ -303,6 +299,8 @@ pub struct HlsPlan {
     pub manifest: String,
     pub variant: Option<String>,
     pub segments: Vec<Segment>,
+    #[serde(default)]
+    pub audio: Option<String>,
 }
 
 pub struct HlsOptions {
@@ -337,6 +335,14 @@ pub async fn download_hls(
     opts: HlsOptions,
     progress: Option<ProgressSender>,
 ) -> Result<HlsOutcome> {
+    download_hls_captured(opts, None, progress).await
+}
+
+pub async fn download_hls_captured(
+    opts: HlsOptions,
+    captured: Option<&str>,
+    progress: Option<ProgressSender>,
+) -> Result<HlsOutcome> {
     let started = Instant::now();
     let emit = |event: ProgressEvent| {
         if let Some(tx) = &progress {
@@ -346,11 +352,10 @@ pub async fn download_hls(
 
     let client = default_client_with(opts.user_agent.as_deref(), &opts.headers)?;
     let plan = match &opts.segments {
-        Some(urls) if !urls.is_empty() => plan_from_segments(
-            urls,
-            opts.base_url.as_deref().unwrap_or(&opts.manifest),
-        )?,
-        _ => resolve_plan(&client, &opts.manifest).await?,
+        Some(urls) if !urls.is_empty() && captured.is_none() => {
+            plan_from_segments(urls, opts.base_url.as_deref().unwrap_or(&opts.manifest))?
+        }
+        _ => resolve_plan(&client, &opts.manifest, captured).await?,
     };
 
     let work = WorkDir::new(&opts.output);
@@ -411,7 +416,11 @@ pub async fn download_hls(
             let _permit = semaphore.acquire_owned().await.expect("semaphore");
             let mut attempt = 0u32;
             loop {
-                if cancel.as_ref().map(|f| f.load(Ordering::Relaxed)).unwrap_or(false) {
+                if cancel
+                    .as_ref()
+                    .map(|f| f.load(Ordering::Relaxed))
+                    .unwrap_or(false)
+                {
                     return Err(Error::Cancelled);
                 }
                 match fetch_segment(&client, &segment, &keys, cancel.as_deref()).await {
@@ -466,12 +475,33 @@ pub async fn download_hls(
         return Err(error);
     }
 
+    let result_path = work.root.join(format!("result.{}", opts.output.extension().and_then(|e| e.to_str()).unwrap_or("mp4")));
     emit(ProgressEvent::Assembling { parts: total });
-    let size = work.assemble(&opts.output, total).await?;
+    let size = if let Some(audio_url) = &plan.audio {
+        let video = work.root.join("video.mp4");
+        let audio = work.root.join("audio.mp4");
+        work.assemble(&video, total).await?;
+        let audio_opts = HlsOptions {
+            manifest: audio_url.clone(),
+            segments: None,
+            base_url: None,
+            output: audio.clone(),
+            connections: opts.connections,
+            user_agent: opts.user_agent.clone(),
+            headers: opts.headers.clone(),
+            expected_sha256: None,
+            cancel: opts.cancel.clone(),
+        };
+        Box::pin(download_hls(audio_opts, None)).await?;
+        crate::media::mux(&video, &audio, &result_path, opts.cancel.clone()).await?;
+        tokio::fs::metadata(&result_path).await?.len()
+    } else {
+        work.assemble(&result_path, total).await?
+    };
 
     let digest = if opts.expected_sha256.is_some() {
         emit(ProgressEvent::Verifying);
-        Some(sha256_file(&opts.output).await?)
+        Some(sha256_file(&result_path).await?)
     } else {
         None
     };
@@ -484,6 +514,14 @@ pub async fn download_hls(
         }
     }
 
+    if opts
+        .cancel
+        .as_ref()
+        .is_some_and(|c| c.load(Ordering::Relaxed))
+    {
+        return Err(Error::Cancelled);
+    }
+    tokio::fs::rename(&result_path, &opts.output).await?;
     let elapsed = started.elapsed();
     emit(ProgressEvent::Finished {
         bytes: size,
@@ -532,22 +570,63 @@ pub fn plan_from_segments(urls: &[String], base: &str) -> Result<HlsPlan> {
     Ok(HlsPlan {
         manifest: base.map(|u| u.to_string()).unwrap_or_default(),
         variant: None,
+        audio: None,
         segments,
     })
 }
 
-async fn resolve_plan(client: &reqwest::Client, manifest: &str) -> Result<HlsPlan> {
+async fn resolve_plan(
+    client: &reqwest::Client,
+    manifest: &str,
+    captured: Option<&str>,
+) -> Result<HlsPlan> {
     let mut current = manifest.to_string();
     let mut variant = None;
+    let mut audio = None;
+    let mut captured = captured.map(str::to_string);
 
     for _ in 0..MAX_PLAYLIST_HOPS {
         let base = Url::parse(&current)
             .map_err(|e| Error::Protocol(format!("bad playlist url {current}: {e}")))?;
-        let text = fetch_text(client, &current).await?;
+        let text = match captured.take() {
+            Some(text) => text,
+            None => fetch_text(client, &current).await?,
+        };
         match parse_playlist(&text, &base)? {
             Playlist::Master(variants) => {
                 let picked = best_variant(&variants)
                     .ok_or_else(|| Error::Protocol("master playlist has no variants".into()))?;
+                let group = text
+                    .lines()
+                    .collect::<Vec<_>>()
+                    .windows(2)
+                    .find_map(|lines| {
+                        if lines[0].starts_with("#EXT-X-STREAM-INF:")
+                            && resolve(&base, lines[1].trim()).as_deref()
+                                == Some(picked.uri.as_str())
+                        {
+                            attr(lines[0], "AUDIO")
+                        } else {
+                            None
+                        }
+                    });
+                if let Some(group) = group {
+                    let renditions: Vec<_> = text
+                        .lines()
+                        .filter(|line| {
+                            line.starts_with("#EXT-X-MEDIA:")
+                                && attr(line, "TYPE").as_deref() == Some("AUDIO")
+                                && attr(line, "GROUP-ID").as_deref() == Some(group.as_str())
+                        })
+                        .collect();
+                    let selected = renditions
+                        .iter()
+                        .find(|line| attr(line, "DEFAULT").as_deref() == Some("YES"))
+                        .or(renditions.first());
+                    audio = selected
+                        .and_then(|line| attr(line, "URI"))
+                        .and_then(|url| resolve(&base, &url));
+                }
                 variant = Some(picked.uri.clone());
                 current = picked.uri.clone();
             }
@@ -558,6 +637,7 @@ async fn resolve_plan(client: &reqwest::Client, manifest: &str) -> Result<HlsPla
                 return Ok(HlsPlan {
                     manifest: manifest.to_string(),
                     variant,
+                    audio,
                     segments,
                 });
             }

@@ -21,6 +21,7 @@ pub mod download;
 pub mod error;
 pub mod hash;
 pub mod hls;
+pub mod media;
 pub mod meta;
 pub mod plan;
 pub mod probe;
@@ -38,7 +39,9 @@ pub use hls::{
     HlsOutcome, HlsPlan, Key, Playlist, Segment, Variant,
 };
 pub use meta::{DownloadMeta, PartState, WorkDir};
-pub use plan::{plan_parts, PlanOptions, DEFAULT_CONNECTIONS, DEFAULT_MIN_PART_SIZE, MAX_CONNECTIONS};
+pub use plan::{
+    plan_parts, PlanOptions, DEFAULT_CONNECTIONS, DEFAULT_MIN_PART_SIZE, MAX_CONNECTIONS,
+};
 pub use probe::{probe, ResourceInfo};
 pub use progress::{channel, ProgressEvent, ProgressSender};
 pub use resolve::{

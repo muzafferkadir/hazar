@@ -2,35 +2,39 @@
   "manifest_version": 3,
   "name": "Hazar Integration",
   "description": "Hands downloads to the Hazar download manager: files, HLS and DASH streams.",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "author": "Muzaffer Kadir Yılmaz",
   "minimum_chrome_version": "109",
-
   "action": {
     "default_title": "Hazar",
     "default_popup": "src/popup.html"
   },
-
   "background": {
     "service_worker": "src/background.js"
   },
-
   "content_scripts": [
     {
-      "matches": ["*://*/*"],
-      "js": ["src/content.js"],
+      "matches": [
+        "*://*/*"
+      ],
+      "js": [
+        "src/content.js"
+      ],
       "run_at": "document_start",
       "all_frames": true
     }
   ],
-
   "web_accessible_resources": [
     {
-      "resources": ["page-hook.js", "recapture.html"],
-      "matches": ["*://*/*"]
+      "resources": [
+        "page-hook.js",
+        "recapture.html"
+      ],
+      "matches": [
+        "*://*/*"
+      ]
     }
   ],
-
   "permissions": [
     "downloads",
     "cookies",
@@ -41,11 +45,12 @@
     "contextMenus",
     "alarms"
   ],
-
-  "optional_permissions": ["notifications"],
-
-  "host_permissions": ["<all_urls>"],
-
+  "optional_permissions": [
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "options_ui": {
     "page": "src/options.html",
     "open_in_tab": false

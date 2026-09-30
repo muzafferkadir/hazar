@@ -6,3 +6,7 @@ src-tauri/gen
 .DS_Store
 .env
 *.log
+
+src-tauri/media/ffmpeg*
+src-tauri/media/*.LICENSE
+src-tauri/media/SOURCES.txt

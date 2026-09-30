@@ -11,7 +11,7 @@ use crate::assemble::assemble;
 use crate::error::{Error, Result};
 use crate::hash::{digest_matches, sha256_file};
 use crate::meta::{DownloadMeta, PartState, WorkDir};
-use crate::plan::{plan_parts, PlanOptions, DEFAULT_CONNECTIONS, DEFAULT_MIN_PART_SIZE};
+use crate::plan::{PlanOptions, DEFAULT_CONNECTIONS, DEFAULT_MIN_PART_SIZE};
 use crate::probe::{probe, ResourceInfo};
 use crate::progress::{ProgressEvent, ProgressSender};
 
@@ -230,7 +230,8 @@ pub fn default_client_full(
         .read_timeout(Duration::from_secs(180))
         .pool_max_idle_per_host(DEFAULT_CONNECTIONS + 4)
         .default_headers(map)
-        .user_agent(ua);
+        .user_agent(ua)
+        .gzip(false).brotli(false);
 
     if let Some(proxy) = proxy {
         let parsed = reqwest::Proxy::all(proxy)
@@ -363,13 +364,13 @@ impl Downloader {
                 &info,
                 size,
                 self.opts.connections,
-                plan_parts(size, plan_opts),
+                crate::plan::plan_work(size, plan_opts),
             )
         };
 
         self.emit(ProgressEvent::Planned {
             size,
-            connections: meta.parts.len(),
+            connections: self.opts.connections.clamp(1, crate::plan::MAX_CONNECTIONS).min(meta.parts.len()),
             resumed,
             bytes_done: meta.bytes_done(),
         });
@@ -400,12 +401,25 @@ impl Downloader {
         };
 
         let parts = shared.lock().expect("meta lock").parts.clone();
+        let jobs = Arc::new(Mutex::new(std::collections::VecDeque::from(parts)));
         let mut set = tokio::task::JoinSet::new();
-        for part in parts {
+        for _ in 0..self.opts.connections.clamp(1, crate::plan::MAX_CONNECTIONS) {
             let this = self.clone();
             let work = work.clone();
             let shared = shared.clone();
-            set.spawn(async move { this.part_worker(part, work, shared).await });
+            let jobs = jobs.clone();
+            set.spawn(async move {
+                loop {
+                    let part = jobs.lock().expect("jobs").pop_front();
+                    let Some(part) = part else {
+                        return Ok(());
+                    };
+                    if this.cancelled() {
+                        return Err(Error::Cancelled);
+                    }
+                    this.part_worker(part, work.clone(), shared.clone()).await?;
+                }
+            });
         }
 
         let mut fatal: Option<Error> = None;
@@ -431,6 +445,7 @@ impl Downloader {
         }
 
         stop.store(true, Ordering::Relaxed);
+        saver.abort();
         let _ = saver.await;
 
         if let Some(e) = fatal {
@@ -460,17 +475,27 @@ impl Downloader {
         self.emit(ProgressEvent::Assembling {
             parts: final_meta.parts.len(),
         });
-        assemble(&work, &self.opts.dest, &final_meta).await?;
+        assemble(
+            &work,
+            &self.opts.dest,
+            &final_meta,
+            self.opts.expected_sha256.as_deref(),
+        )
+        .await?;
 
         let outcome = self
-            .finish(&self.opts.dest, info, size, started, resumed, final_meta.parts.len())
+            .finish(
+                &self.opts.dest,
+                info,
+                size,
+                started,
+                resumed,
+                self.opts.connections.clamp(1, crate::plan::MAX_CONNECTIONS).min(final_meta.parts.len()),
+            )
             .await?;
         // The file is on disk and verified; a leftover sidecar is not fatal.
         if let Err(e) = work.reset().await {
-            eprintln!(
-                "hazar: could not remove {}: {e}",
-                work.root.display()
-            );
+            eprintln!("hazar: could not remove {}: {e}", work.root.display());
         }
         Ok(outcome)
     }
@@ -483,7 +508,11 @@ impl Downloader {
     ) -> Result<()> {
         let mut attempt = 0u32;
         loop {
-            match self.try_part(part.index, &work, &shared).await {
+            let result = tokio::select! {
+                result = self.try_part(part.index, &work, &shared) => result,
+                _ = self.wait_cancel() => Err(Error::Cancelled),
+            };
+            match result {
                 Ok(()) => return Ok(()),
                 Err(e) => {
                     let can_retry = e.is_retryable() && attempt < self.opts.max_retries;
@@ -502,6 +531,10 @@ impl Downloader {
         }
     }
 
+    async fn wait_cancel(&self) {
+        loop { if self.cancelled() { return; } tokio::time::sleep(Duration::from_millis(100)).await; }
+    }
+
     async fn try_part(
         &self,
         index: u32,
@@ -511,13 +544,7 @@ impl Downloader {
         let (start, end, written, total, length) = {
             let meta = shared.lock().expect("meta lock");
             let part = &meta.parts[index as usize];
-            (
-                part.start,
-                part.end,
-                part.written,
-                meta.size,
-                part.length(),
-            )
+            (part.start, part.end, part.written, meta.size, part.length())
         };
         if written >= length {
             return Ok(());
@@ -529,20 +556,32 @@ impl Downloader {
             .get(&self.opts.url)
             .header(header::RANGE, format!("bytes={from}-{end}"));
 
-        // Continuation of a part: refuse to mix bytes from a changed file.
-        if written > 0 {
-            if let Some(etag) = {
-                let meta = shared.lock().expect("meta lock");
-                meta.etag.clone()
-            } {
-                request = request.header(header::IF_RANGE, etag);
-            }
+        let validator = {
+            let meta = shared.lock().expect("meta lock");
+            meta.etag
+                .clone()
+                .filter(|v| !v.starts_with("W/"))
+                .or_else(|| meta.last_modified.clone())
+        };
+        if let Some(validator) = validator {
+            request = request.header(header::IF_RANGE, validator);
         }
 
         let resp = request.send().await?;
         let status = resp.status();
         if status == reqwest::StatusCode::PARTIAL_CONTENT {
-            // good
+            let expected = format!("bytes={from}-{end}/{total}");
+            let actual = resp
+                .headers()
+                .get(header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .replace("bytes ", "bytes=");
+            if actual != expected {
+                return Err(Error::Protocol(
+                    "server returned an unexpected Content-Range".into(),
+                ));
+            }
         } else if status == reqwest::StatusCode::OK {
             // Server answered with the whole file; only valid when this part is all of it.
             if !(start == 0 && length == total && written == 0) {
@@ -560,7 +599,7 @@ impl Downloader {
         let mut last_emit = Instant::now();
         let mut stream = resp.bytes_stream();
 
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = tokio::select! { chunk = stream.next() => chunk, _ = self.wait_cancel() => return Err(Error::Cancelled) } {
             if self.cancelled() {
                 file.flush().await?;
                 self.save_snapshot(shared, work).await;
@@ -617,7 +656,22 @@ impl Downloader {
 
     /// Stream the file with a single connection (no ranges available).
     async fn single_stream(&self, info: &ResourceInfo, started: Instant) -> Result<Outcome> {
-        let resp = self.client.get(&self.opts.url).send().await?;
+        let mut attempt = 0;
+        loop {
+            match self.single_attempt(info, started).await {
+                Ok(outcome) => return Ok(outcome),
+                Err(error) if error.is_retryable() && attempt < self.opts.max_retries => {
+                    attempt += 1;
+                    self.emit(ProgressEvent::Retrying { index: 0, attempt, reason: error.to_string() });
+                    tokio::select! { _ = tokio::time::sleep(Duration::from_millis(400 * 2u64.pow(attempt))) => {}, _ = self.wait_cancel() => return Err(Error::Cancelled) }
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn single_attempt(&self, info: &ResourceInfo, started: Instant) -> Result<Outcome> {
+        let resp = tokio::select! { result = self.client.get(&self.opts.url).send() => result?, _ = self.wait_cancel() => return Err(Error::Cancelled) };
         if !resp.status().is_success() {
             return Err(Error::Status {
                 status: resp.status().as_u16(),
@@ -631,12 +685,13 @@ impl Downloader {
                 tokio::fs::create_dir_all(parent).await?;
             }
         }
-        let mut file = tokio::fs::File::create(&self.opts.dest).await?;
+        let staging = PathBuf::from(format!("{}.partial", self.opts.dest.display()));
+        let mut file = tokio::fs::File::create(&staging).await?;
         let mut written = 0u64;
         let mut last_emit = Instant::now();
         let mut stream = resp.bytes_stream();
 
-        while let Some(chunk) = stream.next().await {
+        while let Some(chunk) = tokio::select! { chunk = stream.next() => chunk, _ = self.wait_cancel() => return Err(Error::Cancelled) } {
             if self.cancelled() {
                 file.flush().await?;
                 return Err(Error::Cancelled);
@@ -668,6 +723,16 @@ impl Downloader {
             });
         }
 
+        if let Some(expected) = &self.opts.expected_sha256 {
+            let actual = sha256_file(&staging).await?;
+            if !digest_matches(expected, &actual) {
+                return Err(Error::ChecksumMismatch {
+                    expected: expected.clone(),
+                    actual,
+                });
+            }
+        }
+        tokio::fs::rename(&staging, &self.opts.dest).await?;
         self.finish(&self.opts.dest, info.clone(), written, started, false, 1)
             .await
     }

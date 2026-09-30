@@ -15,5 +15,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 futures-util = { workspace = true }
 
+getrandom = "0.3"
+url = { workspace = true }
+
 [dev-dependencies]
 tokio-tungstenite = { workspace = true }

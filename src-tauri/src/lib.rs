@@ -1,5 +1,6 @@
 mod bridge;
 mod commands;
+mod store;
 
 use std::sync::Arc;
 
@@ -13,6 +14,16 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            if let Ok(dir) = app.path().resource_dir() {
+                let binary = dir.join("media").join(if cfg!(windows) {
+                    "ffmpeg.exe"
+                } else {
+                    "ffmpeg"
+                });
+                if binary.exists() {
+                    std::env::set_var("HAZAR_FFMPEG", binary);
+                }
+            }
             // Browser-extension bridge (loopback WebSocket) + capture queue.
             let capture = bridge::start(app.handle().clone(), hazar_localapi::Settings::default());
             app.manage(capture);
@@ -44,28 +55,16 @@ pub fn run() {
                 }
             }
 
-            // Native macOS translucency behind the transparent window.
-            #[cfg(target_os = "macos")]
-            {
-                use tauri_plugin_decorum::WebviewWindowExt;
-                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = apply_vibrancy(
-                        &win,
-                        NSVisualEffectMaterial::UnderWindowBackground,
-                        None,
-                        None,
-                    );
-                    let _ = win.set_traffic_lights_inset(16.0, 22.0);
-                }
-            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::engine_version,
-            commands::engine_probe,
-            commands::engine_download,
-            commands::engine_hls,
             commands::capture_status,
             commands::capture_queue,
             commands::capture_cancel,
@@ -73,6 +72,8 @@ pub fn run() {
             commands::capture_settings_get,
             commands::capture_settings_set,
             commands::queue_add,
+            commands::queue_pause,
+            commands::queue_resume,
             commands::extension_path,
             commands::extension_reveal,
             commands::extension_export

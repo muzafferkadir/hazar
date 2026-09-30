@@ -69,7 +69,10 @@ async fn serve(routes: HashMap<String, Vec<u8>>) -> SocketAddr {
     addr
 }
 
-async fn handle(mut stream: TcpStream, routes: Arc<HashMap<String, Vec<u8>>>) -> std::io::Result<()> {
+async fn handle(
+    mut stream: TcpStream,
+    routes: Arc<HashMap<String, Vec<u8>>>,
+) -> std::io::Result<()> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 1024];
     loop {
@@ -129,7 +132,10 @@ fn tmp_dir(tag: &str) -> PathBuf {
 fn detects_playlists_by_url_and_mime() {
     assert!(is_hls("https://x/y/index.m3u8?token=1", None));
     assert!(is_hls("https://x/y", Some("application/vnd.apple.mpegurl")));
-    assert!(is_hls("https://x/y", Some("application/x-mpegURL; charset=utf-8")));
+    assert!(is_hls(
+        "https://x/y",
+        Some("application/x-mpegURL; charset=utf-8")
+    ));
     assert!(!is_hls("https://x/y.mp4", Some("video/mp4")));
 }
 
@@ -144,7 +150,10 @@ fn parses_master_playlist_variants() {
     match parse_playlist(body, &base).unwrap() {
         Playlist::Master(variants) => {
             assert_eq!(variants.len(), 2);
-            assert_eq!(variants[1].uri, "https://cdn.example.com/vod/high/index.m3u8");
+            assert_eq!(
+                variants[1].uri,
+                "https://cdn.example.com/vod/high/index.m3u8"
+            );
             assert_eq!(variants[1].bandwidth, 2_400_000);
             assert_eq!(variants[1].resolution.as_deref(), Some("1280x720"));
         }
@@ -183,7 +192,10 @@ fn parses_media_playlist_with_key_map_and_byterange() {
             assert_eq!(segments[3].byterange, None);
             let key = segments[1].key.as_ref().expect("key inherited");
             assert_eq!(key.method, "AES-128");
-            assert_eq!(key.uri.as_deref(), Some("https://cdn.example.com/vod/high/key.bin"));
+            assert_eq!(
+                key.uri.as_deref(),
+                Some("https://cdn.example.com/vod/high/key.bin")
+            );
             assert_eq!(key.iv, Some(IV));
         }
         other => panic!("expected media playlist, got {other:?}"),
@@ -254,7 +266,10 @@ async fn downloads_encrypted_hls_matches_hash_and_resumes() {
     let got = tokio::fs::read(&output).await.unwrap();
     assert_eq!(got, *media, "decrypted output must equal the fixture");
     assert_eq!(outcome.sha256.as_deref(), Some(digest.as_str()));
-    assert!(!WorkDir::new(&output).root.exists(), "sidecar removed on success");
+    assert!(
+        !WorkDir::new(&output).root.exists(),
+        "sidecar removed on success"
+    );
 
     // Second run: wrong checksum keeps the work dir, third run resumes it.
     let wrong = download_hls(
@@ -417,13 +432,110 @@ async fn sends_custom_headers_to_the_playlist_and_segments() {
     .unwrap();
 
     let requests = seen.lock().await.clone();
-    assert!(requests.len() >= 2, "playlist + segment, got {}", requests.len());
+    assert!(
+        requests.len() >= 2,
+        "playlist + segment, got {}",
+        requests.len()
+    );
     for request in &requests {
         let lower = request.to_ascii_lowercase();
-        assert!(lower.contains("referer: https://site.example/watch"), "{request}");
+        assert!(
+            lower.contains("referer: https://site.example/watch"),
+            "{request}"
+        );
         assert!(lower.contains("cookie: sid=abc123"), "{request}");
         assert!(lower.contains("user-agent: hazartest/9"), "{request}");
     }
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
+async fn provided_segments_still_carry_capture_headers() {
+    // Kullanıcının yolu: eklenti sniff'lediği segment URL'lerini verir, app
+    // manifest'i HİÇ çekmez. Referer/Cookie segment isteğinde olmalı — yoksa
+    // CDN 403 döner (popup'ta "master-3.ts failed · 403" kaydı).
+    let media = payload(256);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let seen: Arc<tokio::sync::Mutex<Vec<String>>> = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let seen_task = seen.clone();
+
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let seen = seen_task.clone();
+            let media = media.clone();
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 1024];
+                loop {
+                    let n = stream.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                seen.lock()
+                    .await
+                    .push(String::from_utf8_lossy(&buf).to_string());
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    media.len()
+                );
+                let _ = stream.write_all(head.as_bytes()).await;
+                let _ = stream.write_all(&media).await;
+                let _ = stream.flush().await;
+            });
+        }
+    });
+
+    let dir = tmp_dir("provided-segments");
+    let output = dir.join("out.ts");
+    download_hls(
+        HlsOptions {
+            manifest: format!("http://{addr}/master.m3u8"),
+            segments: Some(vec![
+                format!("http://{addr}/seg-1.ts"),
+                format!("http://{addr}/seg-2.ts"),
+            ]),
+            base_url: None,
+            output: output.clone(),
+            connections: 1,
+            user_agent: Some("HazarTest/9".into()),
+            headers: vec![
+                ("Referer".into(), "https://player.example/iframe".into()),
+                ("Cookie".into(), "sid=abc123".into()),
+            ],
+            expected_sha256: None,
+            cancel: None,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+
+    let requests = seen.lock().await.clone();
+    assert_eq!(
+        requests.len(),
+        2,
+        "manifest çekilmemeli, yalnızca 2 segment isteği: {requests:?}"
+    );
+    for request in &requests {
+        assert!(request.starts_with("GET /seg-"), "{request}");
+        let lower = request.to_ascii_lowercase();
+        assert!(
+            lower.contains("referer: https://player.example/iframe"),
+            "{request}"
+        );
+        assert!(lower.contains("cookie: sid=abc123"), "{request}");
+    }
+    assert_eq!(std::fs::metadata(&output).unwrap().len(), (256 * 2) as u64);
 
     std::fs::remove_dir_all(dir).ok();
 }

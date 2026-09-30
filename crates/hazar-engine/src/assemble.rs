@@ -8,7 +8,12 @@ use crate::meta::{DownloadMeta, WorkDir};
 const BUF: usize = 1 << 20;
 
 /// Concatenate the part files into `dest` in index order.
-pub async fn assemble(work: &WorkDir, dest: &Path, meta: &DownloadMeta) -> Result<()> {
+pub async fn assemble(
+    work: &WorkDir,
+    dest: &Path,
+    meta: &DownloadMeta,
+    expected_sha256: Option<&str>,
+) -> Result<()> {
     if let Some(parent) = dest.parent() {
         if !parent.as_os_str().is_empty() {
             tokio::fs::create_dir_all(parent).await?;
@@ -53,6 +58,15 @@ pub async fn assemble(work: &WorkDir, dest: &Path, meta: &DownloadMeta) -> Resul
         });
     }
 
+    if let Some(expected) = expected_sha256 {
+        let actual = crate::hash::sha256_file(&tmp).await?;
+        if !crate::hash::digest_matches(expected, &actual) {
+            return Err(Error::ChecksumMismatch {
+                expected: expected.into(),
+                actual,
+            });
+        }
+    }
     tokio::fs::rename(&tmp, dest).await?;
     Ok(())
 }

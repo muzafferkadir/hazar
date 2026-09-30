@@ -27,6 +27,10 @@ const SEGMENT_RETRIES: u32 = 3;
 pub struct DashSegment {
     pub url: String,
     pub init: bool,
+    #[serde(default)]
+    pub track: u8,
+    #[serde(default)]
+    pub range: Option<(u64, u64)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,305 +46,282 @@ impl DashPlan {
     }
 }
 
-/// Parse an MPD into an ordered segment list (init first).
+/// Static VOD MPD parser. XML namespaces, inheritance and timeline are explicit.
 pub fn parse_manifest(body: &str, base: &Url) -> Result<DashPlan> {
-    if body.contains("type=\"dynamic\"") {
-        return Err(Error::Unsupported(
-            "live DASH (type=\"dynamic\") manifests are not supported".into(),
-        ));
+    let doc =
+        roxmltree::Document::parse(body).map_err(|_| Error::Protocol("invalid MPD XML".into()))?;
+    let mpd = doc.root_element();
+    if mpd.tag_name().name() != "MPD" {
+        return Err(Error::Protocol("response is not an MPD".into()));
     }
-    if let Some(drm) = crate::resolve::detect_drm(body) {
-        return Err(Error::Unsupported(format!("DASH protected by {drm}")));
+    if mpd.attribute("type") == Some("dynamic") {
+        return Err(Error::Unsupported("live DASH is not supported".into()));
     }
-
-    let period = elements(body, "Period")
-        .into_iter()
-        .next()
-        .unwrap_or(Element::default());
-    let period_duration_ms = attr(&body[..body.len().min(0)], "mediaPresentationDuration")
-        .or_else(|| attr(&leading_tag(body, "MPD"), "mediaPresentationDuration"))
-        .and_then(|value| iso8601_ms(&value))
-        .or_else(|| attr(&period.attrs, "duration").and_then(|value| iso8601_ms(&value)));
-
-    // BaseURL: element text (may be relative), period first then MPD level.
-    let base_url: Url = elements(&period.content, "BaseURL")
-        .first()
-        .map(|element| element.content.trim().to_string())
-        .or_else(|| {
-            elements(body, "BaseURL")
-                .first()
-                .map(|element| element.content.trim().to_string())
-        })
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            base.join(&value)
-                .map_err(|error| Error::Protocol(format!("bad BaseURL {value}: {error}")))
-        })
-        .transpose()?
-        .unwrap_or_else(|| base.clone());
-
-    // Highest-bandwidth representation inside the first period.
-    let mut best: Option<(u64, Element)> = None;
-    for representation in elements(&period.content, "Representation") {
-        let bandwidth = attr(&representation.attrs, "bandwidth")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(0);
-        if best
-            .as_ref()
-            .map(|(current, _)| bandwidth > *current)
-            .unwrap_or(true)
-        {
-            best = Some((bandwidth, representation));
-        }
-    }
-    let Some((_, representation)) = best else {
-        return Err(Error::Protocol("MPD has no Representation".into()));
-    };
-    let representation_id = attr(&representation.attrs, "id").unwrap_or_else(|| "0".to_string());
-    let bandwidth = attr(&representation.attrs, "bandwidth").unwrap_or_else(|| "0".to_string());
-
-    let mut segments = Vec::new();
-
-    // 1) SegmentTemplate
-    if let Some(template) = tags(&representation.content, "SegmentTemplate")
-        .first()
-        .cloned()
+    if doc
+        .descendants()
+        .any(|n| n.has_tag_name("ContentProtection"))
     {
-        let timescale = attr(&template, "timescale")
-            .and_then(|value| value.parse::<f64>().ok())
-            .unwrap_or(1.0);
-        let duration = attr(&template, "duration").and_then(|value| value.parse::<f64>().ok());
-        let start_number = attr(&template, "startNumber")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(1);
-
-        if let Some(init) = attr(&template, "initialization") {
-            let expanded = expand(&init, &representation_id, &bandwidth, None);
-            segments.push(DashSegment {
-                url: resolve(&base_url, &expanded).map_err(Error::Protocol)?,
-                init: true,
-            });
-        }
-
-        let media = attr(&template, "media")
-            .ok_or_else(|| Error::Protocol("SegmentTemplate without media attribute".into()))?;
-        match (duration, period_duration_ms) {
-            (Some(duration), Some(period_ms)) => {
-                let per_segment_ms = duration / timescale * 1000.0;
-                if per_segment_ms <= 0.0 {
-                    return Err(Error::Protocol("SegmentTemplate duration is zero".into()));
-                }
-                let count = (period_ms / per_segment_ms).ceil() as u64;
-                if count == 0 || count > 20_000 {
-                    return Err(Error::Protocol(format!(
-                        "SegmentTemplate implies an implausible segment count ({count})"
-                    )));
-                }
-                for index in 0..count {
-                    let number = start_number + index;
-                    let expanded = expand(&media, &representation_id, &bandwidth, Some(number));
-                    segments.push(DashSegment {
-                        url: resolve(&base_url, &expanded).map_err(Error::Protocol)?,
-                        init: false,
-                    });
-                }
-            }
-            (None, _) => {
-                // SegmentTimeline: count the <S> entries.
-                let timeline = tags(&template, "SegmentTimeline");
-                let entries: usize = timeline
-                    .iter()
-                    .map(|_| 0)
-                    .sum::<usize>()
-                    .max(0);
-                let _ = entries;
-                let sizes = count_entries(&representation.content);
-                if sizes == 0 {
-                    return Err(Error::Unsupported(
-                        "SegmentTemplate without duration or SegmentTimeline".into(),
-                    ));
-                }
-                for index in 0..sizes as u64 {
-                    let number = start_number + index;
-                    let expanded = expand(&media, &representation_id, &bandwidth, Some(number));
-                    segments.push(DashSegment {
-                        url: resolve(&base_url, &expanded).map_err(Error::Protocol)?,
-                        init: false,
-                    });
-                }
-            }
-            (Some(_), None) => {
-                return Err(Error::Unsupported(
-                    "SegmentTemplate without mediaPresentationDuration/Period duration".into(),
-                ))
+        return Err(Error::Unsupported(format!(
+            "DRM protected DASH: {}",
+            crate::resolve::detect_drm(body).unwrap_or_else(|| "unknown DRM".into())
+        )));
+    }
+    let periods: Vec<_> = mpd
+        .children()
+        .filter(|n| n.has_tag_name("Period"))
+        .collect();
+    if periods.len() != 1 {
+        return Err(Error::Unsupported("DASH requires one Period".into()));
+    }
+    let period = periods[0];
+    let duration = period
+        .attribute("duration")
+        .or(mpd.attribute("mediaPresentationDuration"))
+        .and_then(iso8601_ms);
+    let mut video = None;
+    let mut audio = None;
+    let mut sets: Vec<_> = period
+        .children()
+        .filter(|n| n.has_tag_name("AdaptationSet"))
+        .collect();
+    if sets.is_empty() {
+        sets.push(period);
+    }
+    for set in sets {
+        for rep in set.children().filter(|n| n.has_tag_name("Representation")) {
+            let mime = rep
+                .attribute("mimeType")
+                .or(set.attribute("mimeType"))
+                .unwrap_or("");
+            let content = set.attribute("contentType").unwrap_or("");
+            let slot = if mime.starts_with("audio/") || content == "audio" {
+                &mut audio
+            } else if mime.starts_with("video/") || content == "video" || mime.is_empty() {
+                &mut video
+            } else {
+                continue;
+            };
+            let bandwidth = rep
+                .attribute("bandwidth")
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+            if slot.as_ref().is_none_or(|(old, _, _)| bandwidth > *old) {
+                *slot = Some((bandwidth, set, rep));
             }
         }
     }
-
-    // 2) SegmentList
-    if segments.is_empty() {
-        if let Some(list) = elements(&representation.content, "SegmentList")
-            .into_iter()
-            .next()
-        {
-            if let Some(init) = attr(&list.attrs, "initialization") {
+    let mut segments = Vec::new();
+    let mut representation = None;
+    for (track, selected) in [(0u8, video), (1u8, audio)] {
+        if let Some((_, set, rep)) = selected {
+            let id = rep.attribute("id").unwrap_or("0");
+            representation.get_or_insert_with(|| id.to_string());
+            let mut url = base.clone();
+            for node in [mpd, period, set, rep] {
+                if let Some(value) = node
+                    .children()
+                    .find(|n| n.has_tag_name("BaseURL"))
+                    .and_then(|n| n.text())
+                {
+                    url = url
+                        .join(value.trim())
+                        .map_err(|_| Error::Protocol("invalid DASH BaseURL".into()))?;
+                }
+            }
+            let inherited = |tag: &str| {
+                [rep, set, period, mpd]
+                    .into_iter()
+                    .find_map(|n| n.children().find(|c| c.has_tag_name(tag)))
+            };
+            let mut push = |reference: &str, init: bool, range: Option<&str>| -> Result<()> {
+                let range = range
+                    .map(|v| {
+                        let (start, end) = v
+                            .split_once('-')
+                            .ok_or_else(|| Error::Protocol("bad DASH range".into()))?;
+                        let start: u64 = start
+                            .parse()
+                            .map_err(|_| Error::Protocol("bad DASH range".into()))?;
+                        let end: u64 = end
+                            .parse()
+                            .map_err(|_| Error::Protocol("bad DASH range".into()))?;
+                        if end < start {
+                            return Err(Error::Protocol("bad DASH range".into()));
+                        }
+                        Ok((start, end))
+                    })
+                    .transpose()?;
                 segments.push(DashSegment {
-                    url: resolve(&base_url, &init).map_err(Error::Protocol)?,
-                    init: true,
+                    url: url
+                        .join(reference)
+                        .map_err(|_| Error::Protocol("bad DASH URL".into()))?
+                        .to_string(),
+                    init,
+                    track,
+                    range,
                 });
-            }
-            for entry in tags(&list.content, "SegmentURL") {
-                if let Some(media) = attr(&entry, "media") {
-                    segments.push(DashSegment {
-                        url: resolve(&base_url, &media).map_err(Error::Protocol)?,
-                        init: false,
-                    });
+                Ok(())
+            };
+            if let Some(template) = inherited("SegmentTemplate") {
+                let get = |key: &str| {
+                    [rep, set, period, mpd].into_iter().find_map(|n| {
+                        n.children()
+                            .find(|c| c.has_tag_name("SegmentTemplate"))
+                            .and_then(|c| c.attribute(key))
+                    })
+                };
+                let bandwidth = rep.attribute("bandwidth").unwrap_or("0");
+                if let Some(init) = get("initialization") {
+                    push(&expand(init, id, bandwidth, 0, 0), true, None)?;
                 }
+                let media = get("media")
+                    .ok_or_else(|| Error::Protocol("DASH template has no media".into()))?;
+                let scale = get("timescale")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(1);
+                if scale == 0 {
+                    return Err(Error::Protocol("DASH timescale is zero".into()));
+                }
+                let mut number = get("startNumber")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(1);
+                let timeline = template
+                    .children()
+                    .find(|c| c.has_tag_name("SegmentTimeline"))
+                    .or_else(|| {
+                        [set, period, mpd].into_iter().find_map(|n| {
+                            n.children()
+                                .find(|c| c.has_tag_name("SegmentTemplate"))
+                                .and_then(|t| {
+                                    t.children().find(|c| c.has_tag_name("SegmentTimeline"))
+                                })
+                        })
+                    });
+                if let Some(timeline) = timeline {
+                    let entries: Vec<_> = timeline
+                        .children()
+                        .filter(|n| n.has_tag_name("S"))
+                        .collect();
+                    let mut time = 0u64;
+                    for (i, entry) in entries.iter().enumerate() {
+                        time = entry
+                            .attribute("t")
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(time);
+                        let d = entry
+                            .attribute("d")
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .filter(|d| *d > 0)
+                            .ok_or_else(|| {
+                                Error::Protocol("invalid DASH timeline duration".into())
+                            })?;
+                        let repeat = entry
+                            .attribute("r")
+                            .and_then(|s| s.parse::<i64>().ok())
+                            .unwrap_or(0);
+                        let count = if repeat >= 0 {
+                            repeat as u64 + 1
+                        } else if repeat == -1 {
+                            let end = entries
+                                .get(i + 1)
+                                .and_then(|n| n.attribute("t"))
+                                .and_then(|s| s.parse::<u64>().ok())
+                                .or_else(|| {
+                                    duration.map(|ms| (ms / 1000.0 * scale as f64).ceil() as u64)
+                                })
+                                .ok_or_else(|| {
+                                    Error::Unsupported("unbounded DASH timeline".into())
+                                })?;
+                            end.saturating_sub(time).div_ceil(d)
+                        } else {
+                            return Err(Error::Protocol("invalid DASH repeat".into()));
+                        };
+                        if count > 20000 {
+                            return Err(Error::Protocol("DASH timeline too large".into()));
+                        }
+                        for _ in 0..count {
+                            push(&expand(media, id, bandwidth, number, time), false, None)?;
+                            number += 1;
+                            time = time
+                                .checked_add(d)
+                                .ok_or_else(|| Error::Protocol("DASH timeline overflow".into()))?;
+                        }
+                    }
+                } else {
+                    let d = get("duration")
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .filter(|d| *d > 0)
+                        .ok_or_else(|| {
+                            Error::Unsupported("DASH template needs duration or timeline".into())
+                        })?;
+                    let duration = duration
+                        .ok_or_else(|| Error::Unsupported("DASH duration unknown".into()))?;
+                    let count = (duration / 1000.0 * scale as f64 / d as f64).ceil() as u64;
+                    if count > 20000 {
+                        return Err(Error::Protocol("DASH too large".into()));
+                    }
+                    for i in 0..count {
+                        push(
+                            &expand(media, id, bandwidth, number + i, i * d),
+                            false,
+                            None,
+                        )?;
+                    }
+                }
+            } else if let Some(list) = inherited("SegmentList") {
+                if let Some(init) = list.attribute("initialization") {
+                    push(init, true, None)?;
+                }
+                if let Some(init) = list.children().find(|n| n.has_tag_name("Initialization")) {
+                    push(
+                        init.attribute("sourceURL").unwrap_or(""),
+                        true,
+                        init.attribute("range"),
+                    )?;
+                }
+                for seg in list.children().filter(|n| n.has_tag_name("SegmentURL")) {
+                    push(
+                        seg.attribute("media").unwrap_or(""),
+                        false,
+                        seg.attribute("mediaRange"),
+                    )?;
+                }
+            } else if rep.children().any(|n| n.has_tag_name("BaseURL")) {
+                push("", false, None)?;
+            } else {
+                return Err(Error::Unsupported("unsupported MPD shape".into()));
             }
         }
     }
-
-    // 3) A single BaseURL inside the representation → one file.
-    if segments.is_empty() {
-        if let Some(single) = elements(&representation.content, "BaseURL")
-            .first()
-            .map(|element| element.content.trim().to_string())
-        {
-            if !single.is_empty() {
-                segments.push(DashSegment {
-                    url: resolve(&base_url, &single).map_err(Error::Protocol)?,
-                    init: false,
-                });
-            }
-        }
+    if segments.is_empty() || segments.len() > 40000 {
+        return Err(Error::Protocol("invalid DASH segment count".into()));
     }
-
-    if segments.is_empty() {
-        return Err(Error::Unsupported(
-            "unsupported MPD shape (no SegmentTemplate/SegmentList/SegmentBase)".into(),
-        ));
-    }
-
     Ok(DashPlan {
-        manifest: base.as_str().to_string(),
-        representation: Some(representation_id),
+        manifest: base.to_string(),
+        representation,
         segments,
     })
 }
 
-/// Number of `<S ...>` entries inside a `SegmentTimeline` (or 0).
-fn count_entries(representation_content: &str) -> usize {
-    let Some(timeline) = elements(representation_content, "SegmentTimeline")
-        .into_iter()
-        .next()
-    else {
-        return 0;
-    };
-    tags(&timeline.content, "S").len()
-}
-
-/// Attribute text of the first `name` tag (used for MPD-level attributes).
-fn leading_tag(body: &str, name: &str) -> String {
-    tags(body, name).first().cloned().unwrap_or_default()
-}
-
-/// Expand a DASH template ($Number$, $RepresentationID$, $Bandwidth$, $Time$).
-fn expand(template: &str, representation_id: &str, bandwidth: &str, number: Option<u64>) -> String {
+fn expand(template: &str, id: &str, bandwidth: &str, number: u64, time: u64) -> String {
     let mut out = template
-        .replace("$RepresentationID$", representation_id)
-        .replace("$Bandwidth$", bandwidth);
-    let value = number.unwrap_or(0).to_string();
-    out = out.replace("$Number$", &value);
+        .replace("$RepresentationID$", id)
+        .replace("$Bandwidth$", bandwidth)
+        .replace("$Time$", &time.to_string())
+        .replace("$Number$", &number.to_string());
     while let Some(start) = out.find("$Number%") {
-        // Closing `$` must be searched *after* the opening token.
         let Some(offset) = out[start + 1..].find('$') else {
             break;
         };
         let end = start + 1 + offset;
-        let spec = &out[start + 8..end];
-        let width: usize = spec.trim_end_matches('d').trim().parse().unwrap_or(0);
-        let formatted = format!("{number:0>width$}", number = number.unwrap_or(0), width = width);
-        out = format!("{}{}{}", &out[..start], formatted, &out[end + 1..]);
+        let width = out[start + 8..end]
+            .trim_end_matches('d')
+            .parse::<usize>()
+            .unwrap_or(0)
+            .min(32);
+        out.replace_range(start..=end, &format!("{number:0width$}"));
     }
-    out.replace("$Time$", &value)
-}
-
-fn resolve(base: &Url, reference: &str) -> std::result::Result<String, String> {
-    if let Ok(absolute) = Url::parse(reference) {
-        return Ok(absolute.to_string());
-    }
-    base.join(reference)
-        .map(|url| url.to_string())
-        .map_err(|error| format!("cannot resolve {reference}: {error}"))
-}
-
-#[derive(Debug, Clone, Default)]
-struct Element {
-    /// Text between `<Name` and `>` (attributes).
-    attrs: String,
-    /// Text between `>` and `</Name>` (children), empty for self-closing tags.
-    content: String,
-}
-
-/// Every `name` element with its attributes and inner content.
-fn elements(body: &str, name: &str) -> Vec<Element> {
-    let open = format!("<{name}");
-    let close = format!("</{name}>");
-    let mut out = Vec::new();
-    let mut index = 0;
-    while let Some(found) = body[index..].find(&open) {
-        let start = index + found;
-        let Some(gt) = body[start..].find('>').map(|offset| start + offset) else {
-            break;
-        };
-        let raw = &body[start..gt];
-        let self_closing = raw.trim_end().ends_with('/');
-        let attrs = body[start + open.len()..gt]
-            .trim_end()
-            .trim_end_matches('/')
-            .to_string();
-        let content = if self_closing {
-            String::new()
-        } else {
-            match body[gt..].find(&close) {
-                Some(offset) => body[gt + 1..gt + offset].to_string(),
-                None => String::new(),
-            }
-        };
-        out.push(Element { attrs, content });
-        index = gt + 1;
-        if index >= body.len() {
-            break;
-        }
-    }
-    out
-}
-
-/// Attribute text of every `name` tag.
-fn tags(body: &str, name: &str) -> Vec<String> {
-    elements(body, name)
-        .into_iter()
-        .map(|element| element.attrs)
-        .collect()
-}
-
-fn attr(tag: &str, name: &str) -> Option<String> {
-    let needle = format!("{name}=");
-    let mut index = 0;
-    while let Some(position) = tag[index..].find(&needle) {
-        let position = index + position;
-        let after = &tag[position + needle.len()..];
-        let quote = after.chars().next()?;
-        if quote == '"' || quote == '\'' {
-            let value: String = after[1..].chars().take_while(|c| *c != quote).collect();
-            return Some(value);
-        }
-        index = position + needle.len();
-        if index >= tag.len() {
-            break;
-        }
-    }
-    None
+    out.replace("$$", "$")
 }
 
 /// `PT1H2M3.5S` → milliseconds
@@ -396,6 +377,14 @@ pub async fn download_dash(
     opts: DashOptions,
     progress: Option<ProgressSender>,
 ) -> Result<DashOutcome> {
+    download_dash_captured(opts, None, progress).await
+}
+
+pub async fn download_dash_captured(
+    opts: DashOptions,
+    captured: Option<&str>,
+    progress: Option<ProgressSender>,
+) -> Result<DashOutcome> {
     let started = Instant::now();
     let emit = |event: ProgressEvent| {
         if let Some(tx) = &progress {
@@ -404,7 +393,10 @@ pub async fn download_dash(
     };
 
     let client = default_client_with(opts.user_agent.as_deref(), &opts.headers)?;
-    let body = fetch_text(&client, &opts.manifest).await?;
+    let body = match captured {
+        Some(body) => body.to_string(),
+        None => fetch_text(&client, &opts.manifest).await?,
+    };
     let base = Url::parse(&opts.manifest)
         .map_err(|error| Error::Protocol(format!("bad manifest url: {error}")))?;
     let plan = parse_manifest(&body, &base)?;
@@ -415,7 +407,11 @@ pub async fn download_dash(
         Ok(raw) => serde_json::from_slice(&raw).ok(),
         Err(_) => None,
     };
-    if existing.as_ref().map(|previous| previous.segments != plan.segments).unwrap_or(true) {
+    if existing
+        .as_ref()
+        .map(|previous| previous.segments != plan.segments)
+        .unwrap_or(true)
+    {
         work.reset().await?;
     }
     work.ensure().await?;
@@ -456,14 +452,18 @@ pub async fn download_dash(
             let _permit = semaphore.acquire_owned().await.expect("semaphore");
             let mut attempt = 0u32;
             loop {
-                if cancel.as_ref().map(|flag| flag.load(Ordering::Relaxed)).unwrap_or(false) {
+                if cancel
+                    .as_ref()
+                    .map(|flag| flag.load(Ordering::Relaxed))
+                    .unwrap_or(false)
+                {
                     return Err(Error::Cancelled);
                 }
-                match fetch_bytes(&client, &segment.url).await {
+                match fetch_bytes(&client, &segment.url, segment.range).await {
                     Ok(data) => {
                         work.dash_write(index, &data).await?;
-                        let written =
-                            bytes.fetch_add(data.len() as u64, Ordering::Relaxed) + data.len() as u64;
+                        let written = bytes.fetch_add(data.len() as u64, Ordering::Relaxed)
+                            + data.len() as u64;
                         let finished = done.fetch_add(1, Ordering::Relaxed) + 1;
                         if let Some(tx) = &tx {
                             let _ = tx.send(ProgressEvent::HlsSegment {
@@ -511,12 +511,23 @@ pub async fn download_dash(
         return Err(error);
     }
 
+    let result_path = work.root.join(format!("result.{}", opts.output.extension().and_then(|e| e.to_str()).unwrap_or("mp4")));
     emit(ProgressEvent::Assembling { parts: total });
-    let size = work.dash_assemble(&opts.output, total).await?;
+    let has_audio = plan.segments.iter().any(|s| s.track == 1);
+    let size = if has_audio && plan.segments.iter().any(|s| s.track == 0) {
+        let video = work.root.join("video.mp4");
+        let audio = work.root.join("audio.mp4");
+        work.dash_assemble_track(&video, &plan, 0).await?;
+        work.dash_assemble_track(&audio, &plan, 1).await?;
+        crate::media::mux(&video, &audio, &result_path, opts.cancel.clone()).await?;
+        tokio::fs::metadata(&result_path).await?.len()
+    } else {
+        work.dash_assemble(&result_path, total).await?
+    };
 
     let digest = if opts.expected_sha256.is_some() {
         emit(ProgressEvent::Verifying);
-        Some(sha256_file(&opts.output).await?)
+        Some(sha256_file(&result_path).await?)
     } else {
         None
     };
@@ -529,6 +540,14 @@ pub async fn download_dash(
         }
     }
 
+    if opts
+        .cancel
+        .as_ref()
+        .is_some_and(|c| c.load(Ordering::Relaxed))
+    {
+        return Err(Error::Cancelled);
+    }
+    tokio::fs::rename(&result_path, &opts.output).await?;
     let elapsed = started.elapsed();
     emit(ProgressEvent::Finished {
         bytes: size,
@@ -573,8 +592,28 @@ async fn fetch_text(client: &reqwest::Client, url: &str) -> Result<String> {
     Ok(body)
 }
 
-async fn fetch_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
-    let response = client.get(url).send().await?;
+async fn fetch_bytes(
+    client: &reqwest::Client,
+    url: &str,
+    range: Option<(u64, u64)>,
+) -> Result<Vec<u8>> {
+    let mut request = client.get(url);
+    if let Some((start, end)) = range {
+        request = request.header(reqwest::header::RANGE, format!("bytes={start}-{end}"));
+    }
+    let response = request.send().await?;
+    if let Some((start, end)) = range {
+        let expected = format!("bytes {start}-{end}/");
+        if response.status().as_u16() != 206
+            || !response
+                .headers()
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|s| s.to_str().ok())
+                .is_some_and(|s| s.starts_with(&expected))
+        {
+            return Err(Error::Protocol("DASH byte range mismatch".into()));
+        }
+    }
     if !response.status().is_success() {
         return Err(Error::Status {
             status: response.status().as_u16(),
@@ -612,6 +651,26 @@ impl WorkDir {
         Ok(())
     }
 
+    async fn dash_assemble_track(
+        &self,
+        output: &std::path::Path,
+        plan: &DashPlan,
+        track: u8,
+    ) -> Result<()> {
+        let mut out = tokio::fs::File::create(output).await?;
+        for (index, segment) in plan
+            .segments
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.track == track)
+        {
+            let _ = segment;
+            let mut part = tokio::fs::File::open(self.segment_path_named(index)).await?;
+            tokio::io::copy(&mut part, &mut out).await?;
+        }
+        out.sync_all().await?;
+        Ok(())
+    }
     async fn dash_assemble(&self, output: &std::path::Path, count: usize) -> Result<u64> {
         if let Some(parent) = output.parent() {
             if !parent.as_os_str().is_empty() {
@@ -650,6 +709,18 @@ mod tests {
     </AdaptationSet>
   </Period>
 </MPD>"#;
+
+    #[test]
+    fn inherited_timeline_preserves_time_and_separates_audio() {
+        let body = r#"<MPD mediaPresentationDuration="PT6S"><Period>
+        <AdaptationSet mimeType="video/mp4"><SegmentTemplate timescale="1" initialization="v-init.mp4" media="v-$Time$.m4s"><SegmentTimeline><S t="100" d="2" r="2"/></SegmentTimeline></SegmentTemplate><Representation id="v" bandwidth="1000"/></AdaptationSet>
+        <AdaptationSet mimeType="audio/mp4"><SegmentTemplate duration="2" media="a-$Number$.m4s"/><Representation id="a" bandwidth="100"/></AdaptationSet>
+        </Period></MPD>"#;
+        let plan = parse_manifest(body, &Url::parse("https://cdn.example/m.mpd").unwrap()).unwrap();
+        let video: Vec<_> = plan.segments.iter().filter(|s| s.track == 0 && !s.init).map(|s| s.url.clone()).collect();
+        assert_eq!(video, vec!["https://cdn.example/v-100.m4s", "https://cdn.example/v-102.m4s", "https://cdn.example/v-104.m4s"]);
+        assert_eq!(plan.segments.iter().filter(|s| s.track == 1).count(), 3);
+    }
 
     #[test]
     fn picks_the_highest_bandwidth_and_numbers_segments() {
