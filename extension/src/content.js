@@ -18,7 +18,7 @@
   let querying = false;
   const t = globalThis.HazarI18n?.t || (key => key);
   globalThis.HazarI18n?.onChange(() => {
-    for (const panel of panels.values()) { panel.fingerprint = null; if (!panel.busy) panel.label.textContent = t("panelDownload"); panel.close.title = t("panelClose"); }
+    for (const panel of panels.values()) { panel.fingerprint = null; panel.button.title = t("panelDownload"); panel.close.title = t("panelClose"); }
     void refreshPanels();
   });
 
@@ -189,39 +189,37 @@
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = `<style>
       :host{all:initial}*{box-sizing:border-box}
-      .panel{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#fff;pointer-events:auto;width:max-content;max-width:280px}
-      .bar{display:flex;align-items:stretch;border:1px solid rgba(255,255,255,.3);border-radius:9px;overflow:hidden;background:rgba(10,90,148,.92);backdrop-filter:blur(8px);box-shadow:0 2px 12px rgba(0,0,0,.45)}
-      button{font:inherit;cursor:pointer;color:inherit;border:0;background:transparent;padding:7px 11px;line-height:1.3}
-      button:hover{background:rgba(255,255,255,.12)}button:disabled{opacity:.7;cursor:wait}button:focus-visible{outline:2px solid #fff;outline-offset:-2px}
-      .download{font-weight:600;display:flex;align-items:center;gap:6px;padding:5px 9px}.icon{font-size:14px;line-height:1}.label{max-width:0;overflow:hidden;white-space:nowrap;transition:max-width .18s ease;margin-left:-6px}.panel:hover .label,.panel.open .label,.panel.busy .label,.panel:focus-within .label{max-width:200px;margin-left:0}.close{display:none}.panel:hover .close,.panel.open .close,.panel:focus-within .close{display:block}
-      .quality{display:none;font-size:11px;font-weight:700;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.2)}.panel:hover .quality:not(:empty),.panel.open .quality:not(:empty),.panel:focus-within .quality:not(:empty){display:inline}
-      .close{padding:5px 8px;border-left:1px solid rgba(255,255,255,.2);font-size:15px;line-height:1;opacity:.85}
-      .bar.ytdlp{background:rgba(6,31,66,.94);border-color:#7FD0FF}.bar.ytdlp .download{color:#8FDBFF}
-      .menu,.status{margin-top:5px;background:rgba(6,31,66,.94);backdrop-filter:blur(8px);border:1px solid rgba(127,208,255,.25);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.45)}
-      .menu{padding:4px;max-height:240px;overflow:auto}.menu[hidden],.status:empty{display:none}
-      .menu button{display:block;width:100%;text-align:left;border-radius:6px}.menu button.ytdlp{color:#8FDBFF}.menu button:hover{background:rgba(127,208,255,.14)}
-      .status{padding:7px 9px;overflow-wrap:anywhere;font-size:12px;line-height:1.4}
-    </style><div class="panel"><div class="bar"><button class="download" type="button" aria-expanded="false"><span class="icon">↓</span><span class="label"></span><span class="quality"></span></button><button class="close" type="button">×</button></div><div class="menu" hidden></div><div class="status" role="status"></div></div>`;
-    const panel = { video, host, button: root.querySelector(".download"), bar: root.querySelector(".bar"),
-      root: root.querySelector(".panel"), label: root.querySelector(".label"), quality: root.querySelector(".quality"), close: root.querySelector(".close"),
-      menu: root.querySelector(".menu"), status: root.querySelector(".status"), candidates: [], busy: false, dismissed: false };
-    panel.label.textContent = t("panelDownload");
+      .panel{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#fff;pointer-events:auto;display:flex;flex-direction:column;align-items:flex-end}
+      button{font:inherit;cursor:pointer;color:inherit;border:0;background:transparent;padding:0;line-height:1.3}
+      button:disabled{cursor:wait}button:focus-visible{outline:2px solid #7FD0FF;outline-offset:2px}
+      .logo{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;opacity:.8;box-shadow:0 2px 10px rgba(0,0,0,.45);transition:opacity .15s,transform .15s}
+      .logo:hover,.panel.open .logo{opacity:1;transform:scale(1.06)}.logo img{width:30px;height:30px;display:block}
+      .card{margin-top:6px;min-width:220px;max-width:300px;background:rgba(6,31,66,.95);backdrop-filter:blur(10px);border:1px solid rgba(127,208,255,.25);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.5);overflow:hidden}
+      .card[hidden]{display:none}
+      .head{display:flex;align-items:center;justify-content:space-between;padding:7px 8px 7px 11px;font-weight:600;border-bottom:1px solid rgba(127,208,255,.15)}
+      .close{width:22px;height:22px;border-radius:6px;font-size:15px;line-height:1;opacity:.8}.close:hover{background:rgba(255,255,255,.12);opacity:1}
+      .menu{padding:4px;max-height:260px;overflow:auto}
+      .menu button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:7px 8px;border-radius:7px}
+      .menu button:hover{background:rgba(127,208,255,.14)}
+      .q{flex:none;min-width:44px;text-align:center;font-size:11px;font-weight:700;padding:2px 6px;border-radius:5px;background:#0A5A94}
+      .ytdlp .q{background:transparent;border:1px solid #7FD0FF;color:#8FDBFF}
+      .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .status{padding:7px 11px;border-top:1px solid rgba(127,208,255,.15);font-size:12px;line-height:1.4;overflow-wrap:anywhere}.status:empty{display:none}
+    </style><div class="panel"><button class="logo" type="button" aria-expanded="false"><img alt="Hazar"></button><div class="card" hidden><div class="head"><span>Hazar</span><button class="close" type="button">×</button></div><div class="menu"></div><div class="status" role="status"></div></div></div>`;
+    const panel = { video, host, button: root.querySelector(".logo"), card: root.querySelector(".card"),
+      root: root.querySelector(".panel"), close: root.querySelector(".close"),
+      menu: root.querySelector(".menu"), status: root.querySelector(".status"), candidates: [], busy: false };
+    root.querySelector(".logo img").src = chrome.runtime.getURL("icons/32x32.png");
+    panel.button.title = panel.button.ariaLabel = t("panelDownload");
     panel.close.title = panel.close.ariaLabel = t("panelClose");
-    // Sadece × kapatır; video tıklamaları paneli ve menüyü kapatmaz.
-    panel.close.addEventListener("click", () => { panel.dismissed = true; panel.menu.hidden = true; panel.root.classList.remove("open"); positionPanels(); });
+    const setOpen = open => { panel.card.hidden = !open; panel.root.classList.toggle("open", open); panel.button.setAttribute("aria-expanded", String(open)); positionPanels(); };
+    panel.setOpen = setOpen;
+    // Liste sadece × ile kapanır; video tıklamaları paneli kapatmaz.
+    panel.close.addEventListener("click", () => setOpen(false));
     root.addEventListener("pointerdown", event => event.stopPropagation());
     root.addEventListener("click", event => event.stopPropagation());
-    panel.button.addEventListener("click", async () => {
-      if (panel.busy) return;
-      if (panel.candidates.length === 1) { await download(panel, panel.candidates[0]); return; }
-      panel.menu.hidden = !panel.menu.hidden;
-      panel.root.classList.toggle("open", !panel.menu.hidden);
-      panel.button.setAttribute("aria-expanded", String(!panel.menu.hidden));
-      positionPanels();
-    });
-    panel.button.addEventListener("keydown", event => {
-      if (event.key === "Escape") { panel.menu.hidden = true; panel.root.classList.remove("open"); panel.button.setAttribute("aria-expanded", "false"); }
-    });
+    panel.button.addEventListener("click", () => setOpen(panel.card.hidden));
+    root.addEventListener("keydown", event => { if (event.key === "Escape") setOpen(false); });
     panel.resize = new ResizeObserver(positionPanels);
     panel.resize.observe(video);
     (document.body || document.documentElement).appendChild(host);
@@ -230,20 +228,14 @@
 
   async function download(panel, candidate) {
     panel.busy = true;
-    panel.button.disabled = true;
-    panel.label.textContent = t("panelSending");
-    panel.root.classList.add("busy"); panel.root.classList.remove("open");
-    panel.status.textContent = "";
-    panel.menu.hidden = true;
-    panel.button.setAttribute("aria-expanded", "false");
+    panel.menu.querySelectorAll("button").forEach(b => { b.disabled = true; });
+    panel.status.textContent = t("panelSending");
     const result = await rpc({ type: "grab", url: candidate.url, kind: candidate.kind,
       extractor: candidate.extractor, filename: candidate.filename, pageTitle: document.title });
     panel.busy = false;
-    panel.button.disabled = false;
-    panel.label.textContent = result.ok ? t("panelSent") : t("panelDownload");
-    // Sonucu kısa süre göster, sonra küçük haline dön.
-    setTimeout(() => { panel.root.classList.remove("busy"); if (!panel.busy) panel.label.textContent = t("panelDownload"); }, result.ok ? 2500 : 6000);
-    if (!result.ok) panel.status.textContent = result.error || t("openApp");
+    panel.menu.querySelectorAll("button").forEach(b => { b.disabled = false; });
+    panel.status.textContent = result.ok ? t("panelSent") : (result.error || t("openApp"));
+    if (result.ok) setTimeout(() => { if (panel.status.textContent === t("panelSent")) { panel.status.textContent = ""; panel.setOpen(false); } }, 1800);
     positionPanels();
   }
 
@@ -266,7 +258,7 @@
       for (const panel of panels.values()) {
         const rect = panel.video.getBoundingClientRect();
         const style = getComputedStyle(panel.video);
-        const visible = !panel.dismissed && panel.candidates.length && rect.width >= 140 && rect.height >= 80
+        const visible = panel.candidates.length && rect.width >= 140 && rect.height >= 80
           && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth
           && style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) !== 0;
         const fullscreen = document.fullscreenElement;
@@ -290,8 +282,6 @@
       for (const panel of panels.values()) {
         if (!panel.video.isConnected) continue;
         const src = panel.video.currentSrc || panel.video.src;
-        // Aynı <video> yeni bir videoya geçtiyse (SPA) kapatılmış panel geri gelir.
-        if (panel.src !== src) { panel.src = src; panel.dismissed = false; }
         const result = await rpc({ type: "video_candidates", mediaUrl: src, pageUrl: location.href });
         let candidates = result.candidates || [];
         const exact = candidates.filter(c => c.url === src);
@@ -313,16 +303,18 @@
         if (panel.fingerprint !== fingerprint) {
           panel.fingerprint = fingerprint;
           panel.candidates = candidates;
-          panel.bar.classList.toggle("ytdlp", candidates.length === 1 && candidates[0].extractor === "ytdlp");
-          if (!panel.busy) panel.label.textContent = t("panelDownload");
-          const best = Math.max(0, ...candidates.map(c => c.height || Number(/^(\d{3,4})p$/.exec(c.label || "")?.[1]) || 0));
-          panel.quality.textContent = best ? `${best}p` : "";
           panel.menu.replaceChildren();
           for (const candidate of candidates) {
+            const height = candidate.height || Number(/^(\d{3,4})p$/.exec(candidate.label || "")?.[1]) || 0;
             const button = document.createElement("button");
-            button.classList.toggle("ytdlp", candidate.extractor === "ytdlp");
             button.type = "button";
-            button.textContent = `↓ ${candidate.label}${candidate.height && !String(candidate.label).includes(`${candidate.height}p`) ? ` · ${candidate.height}p` : ""}`;
+            button.classList.toggle("ytdlp", candidate.extractor === "ytdlp");
+            const q = document.createElement("span"); q.className = "q";
+            q.textContent = height ? `${height}p` : candidate.extractor === "ytdlp" ? "yt-dlp" : (candidate.kind || "file").toUpperCase();
+            const name = document.createElement("span"); name.className = "name";
+            name.textContent = String(candidate.label || "").replace(/^yt-dlp · (\d{3,4}p · )?/, "").replace(/^\d{3,4}p$/, "Video") || "Video";
+            name.title = name.textContent;
+            button.append(q, name);
             button.addEventListener("click", () => { if (!panel.busy) void download(panel, candidate); });
             panel.menu.appendChild(button);
           }

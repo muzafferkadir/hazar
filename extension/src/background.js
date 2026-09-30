@@ -20,6 +20,7 @@ if (typeof importScripts === "function" && typeof HazarLib === "undefined") {
   }
 }
 const Lib = globalThis.HazarLib;
+const t = (...args) => globalThis.HazarI18n?.t(...args) ?? args[0];
 
 const PROTOCOL = 1;
 const SUBPROTOCOL = "hazar.v1";
@@ -383,7 +384,7 @@ async function extractorCandidates(tabId, pageUrl) {
   if ((state.settings.excluded_hosts || []).some(h => host === h || host.endsWith(`.${h}`))) return [];
   if (!(await ensureConnected()) || !state.features.includes("ytdlp")) return [];
   if (!state.features.includes("ytdlp_context")) {
-    extractionCache.set(extractionKey(tabId, pageUrl), { settled: true, items: [], error: { code: "update", message: "Yeni yt-dlp entegrasyonu için Hazar’ı yeniden aç.", retry_after: 0 } });
+    extractionCache.set(extractionKey(tabId, pageUrl), { settled: true, items: [], error: { code: "update", message: t("errReopenForYtdlp"), retry_after: 0 } });
     return [];
   }
   const cooldown = extractorCooldowns.get(host);
@@ -400,10 +401,10 @@ async function extractorCandidates(tabId, pageUrl) {
     await attachExtractorContext(request, tabId);
     const id = crypto.randomUUID();
     const reply = await new Promise(resolve => {
-      const timer = setTimeout(() => { extractionReplies.delete(id); resolve({ error: { code: "timeout", message: "yt-dlp analiz timeout. Tekrar dene.", retry_after: 60 } }); }, 65000);
+      const timer = setTimeout(() => { extractionReplies.delete(id); resolve({ error: { code: "timeout", message: t("errAnalyzeTimeout"), retry_after: 60 } }); }, 65000);
       extractionReplies.set(id, { resolve, timer });
       if (!send({ type: "extract", id, request, session: state.session })) {
-        clearTimeout(timer); extractionReplies.delete(id); resolve({ error: { code: "connection", message: "Hazar bağlantısı kesildi.", retry_after: 0 } });
+        clearTimeout(timer); extractionReplies.delete(id); resolve({ error: { code: "connection", message: t("errDisconnected"), retry_after: 0 } });
       }
     });
     const title = reply?.title;
@@ -419,7 +420,7 @@ async function extractorCandidates(tabId, pageUrl) {
     return items;
   })().catch(() => {
     const entry = extractionCache.get(key);
-    if (entry) { entry.items = []; entry.settled = true; entry.error = { code: "context", message: "Browser oturumu okunamadı. Sayfayı yenile.", retry_after: 0 }; }
+    if (entry) { entry.items = []; entry.settled = true; entry.error = { code: "context", message: t("errContext"), retry_after: 0 }; }
     return [];
   });
   if (extractionCache.size > 60) extractionCache.delete(extractionCache.keys().next().value);
@@ -430,7 +431,8 @@ async function combinedVideoCandidates(tabId, frameId, mediaUrl, pageUrl) {
   // The native options remain visible while the independent extractor works.
   void extractorCandidates(tabId, pageUrl);
   const cached = extractionCache.get(extractionKey(tabId, pageUrl));
-  return [...videoCandidates(tabId, frameId, mediaUrl, pageUrl), ...(cached?.items || [])];
+  // YouTube linkleri yt-dlp adayıyla aynı video; listede iki kez görünmesin.
+  return [...videoCandidates(tabId, frameId, mediaUrl, pageUrl).filter(c => !Lib.youtubeVideoUrl(c.url)), ...(cached?.items || [])];
 }
 
 
@@ -451,7 +453,7 @@ function handleAppMessage(message) {
           await attachExtractorContext(request, message.tab_id);
           send({ type: "context", id: message.id, session: state.session, context: request.browser_context, error: null });
         } catch (_) {
-          send({ type: "context", id: message.id, session: state.session, context: null, error: "Browser session değişti. Video sayfasından tekrar gönder." });
+          send({ type: "context", id: message.id, session: state.session, context: null, error: t("errSessionChanged") });
         }
       })();
       break;
@@ -892,7 +894,7 @@ async function segmentsForStream(tabId, url, frameId, provided) {
     resolved.segments.capturePlan = resolved.capturePlan;
     return resolved.segments;
   }
-  return { error: resolved.error || "Tam media playlist bulunamadı; eksik video kaydedilmedi" };
+  return { error: resolved.error || t("errNoPlaylist") };
 }
 
 /** Oynatıcının kendi manifest yanıtı: düz metinse segmentleri çıkar, değilse işaretle. */
@@ -1150,9 +1152,9 @@ async function extractorNetwork(raw, tabId) {
       const host = rule.host.includes(":") ? `[${rule.host}]` : rule.host;
       return { proxy: `${scheme}://${host}:${rule.port || (scheme === "https" ? 443 : scheme.startsWith("socks") ? 1080 : 80)}`, source_address };
     }
-    if (["pac_script", "auto_detect"].includes(config?.mode)) return { proxy: null, source_address, network_error: "proxy PAC otomatik eşlenemiyor; extension ayarından yt-dlp proxy gir" };
+    if (["pac_script", "auto_detect"].includes(config?.mode)) return { proxy: null, source_address, network_error: t("errPac") };
     return { proxy: null, source_address }; // system uses the downloader's system/environment proxy.
-  } catch (_) { return { proxy: null, source_address, network_error: "proxy ayarı okunamadı" }; }
+  } catch (_) { return { proxy: null, source_address, network_error: t("errProxyRead") }; }
 }
 async function attachExtractorContext(request, tabId) {
   const page = await pageInfo(tabId);
@@ -1399,16 +1401,16 @@ async function resolveSegments(tabId, url, frameId, depth, includeAudio = true) 
     try {
       text = atob(fetched.base64 || "");
     } catch (_) {
-      return { error: "playlist gövdesi okunamadı" };
+      return { error: t("errPlaylistBody") };
     }
   }
 
   if (!text.trimStart().startsWith("#EXTM3U")) {
-    return { error: "playlist düz metin değil (client-side şifreli?)" };
+    return { error: t("errPlaylistText") };
   }
   const variant = Lib.bestVariantFromPlaylist(text, url);
   if (variant) {
-    if (depth <= 0) return { error: "Playlist zinciri çok uzun" };
+    if (depth <= 0) return { error: t("errPlaylistChain") };
     const video = await resolveSegments(tabId, variant, frameId, depth - 1, false);
     if (video.error || !includeAudio) return video;
     const audioUrl = Lib.audioRenditionFromPlaylist(text, url, variant);
@@ -1419,7 +1421,7 @@ async function resolveSegments(tabId, url, frameId, depth, includeAudio = true) 
     }
     return video;
   }
-  if (!text.includes("#EXT-X-ENDLIST")) return { error: "Tamamlanmış VOD playlist yok; eksik stream kaydedilmedi" };
+  if (!text.includes("#EXT-X-ENDLIST")) return { error: t("errNotVod") };
   let audio = null;
   if (includeAudio) {
     const masters = candidatesFor(tabId).filter(c => c.manifest && c.manifest.includes("#EXT-X-STREAM-INF"));
@@ -1458,16 +1460,16 @@ const statusish = Lib.statusish;
  * oturumundan (Referer/çerez/UA) çıkar.
  */
 async function tunnelSegments({ tabId, frameId, segments, filename, id, manifest, audio = segments.audio }) {
-  if (!(await ensureConnected())) return { ok: false, error: "Hazar bağlı değil" };
-  if (audio && !state.features.includes("hls_audio_bytes")) return { ok: false, error: "Sesli download için Hazar uygulamasını güncelle" };
+  if (!(await ensureConnected())) return { ok: false, error: t("errNotConnected") };
+  if (audio && !state.features.includes("hls_audio_bytes")) return { ok: false, error: t("errUpdateAudio") };
   let capturePlan = segments.capturePlan || (manifest ? Lib.capturePlanFromPlaylist(manifest, segments.manifestUrl || segments[0]) : segments.map(url => ({ url })));
   const audioStart = audio ? capturePlan.length : null;
   if (audio) capturePlan = [...capturePlan, ...audio.capturePlan];
   const keys = new Map();
-  if (!state.features.includes("bytes_ack")) return { ok: false, error: "Hazar uygulamasını güncelle" };
+  if (!state.features.includes("bytes_ack")) return { ok: false, error: t("errUpdateApp") };
   const streamId = id || `cap-${Date.now().toString(36)}`;
   const name = filename || "stream.ts";
-  if (!segments.length) return { ok: false, error: "Segment listesi boş" };
+  if (!segments.length) return { ok: false, error: t("errNoSegments") };
   const fail = error => {
     updateRecent({ id: streamId, state: "failed", error, at: Date.now() });
     send({ type: "capture_failed", session: state.session, id: streamId, reason: error });
@@ -1483,9 +1485,9 @@ async function tunnelSegments({ tabId, frameId, segments, filename, id, manifest
         let key = keys.get(segment.key.url);
         if (!key) {
           const response = await fetchInFrame(tabId, segment.key.url, frameId);
-          if (!response?.ok) throw new Error("HLS key alınamadı");
+          if (!response?.ok) throw new Error(t("errHlsKey"));
           const raw = Uint8Array.from(atob(response.base64), c => c.charCodeAt(0));
-          if (raw.length !== 16) throw new Error("HLS AES-128 key uzunluğu geçersiz");
+          if (raw.length !== 16) throw new Error(t("errHlsKeyLength"));
           key = await crypto.subtle.importKey("raw", raw, "AES-CBC", false, ["decrypt"]);
           keys.set(segment.key.url, key);
         }
@@ -1528,7 +1530,7 @@ async function tunnelSegments({ tabId, frameId, segments, filename, id, manifest
     });
     if (!sent) {
       const pending = chunkAcks.get(key); clearTimeout(pending.timer); chunkAcks.delete(key);
-      return fail("app bağlı değil");
+      return fail(t("errAppNotConnected"));
     }
     try { await ack; } catch (error) {
       return fail(String(error));
@@ -1540,10 +1542,11 @@ async function tunnelSegments({ tabId, frameId, segments, filename, id, manifest
 
 async function submitGrab(message, tabId, pageUrl, frameId, frameUrl) {
   const youtube = Lib.youtubeVideoUrl(message.url);
-  if (message.extractor === "ytdlp") {
-    if (!(await ensureConnected()) || !state.features.includes("ytdlp")) return { ok: false, error: "yt-dlp için Hazar’ı güncelle" };
-  } else if (youtube) {
-    if (!(await ensureConnected()) || !state.features.includes("youtube")) return { ok: false, error: "YouTube için Hazar'ı güncelle" };
+  if (message.extractor === "ytdlp" || youtube) {
+    if (!(await ensureConnected())) return { ok: false, error: t("errNotConnected"), connected: false };
+    if (!state.features.includes("ytdlp")) return { ok: false, error: t("errUpdateYtdlp") };
+  }
+  if (youtube) {
     message = { ...message, url: youtube, kind: "file" };
   }
   const request = await buildRequest({
@@ -1580,7 +1583,7 @@ async function submitGrab(message, tabId, pageUrl, frameId, frameUrl) {
     if (!Array.isArray(resolved) || resolved.length === 0) {
       const reason =
         (resolved && resolved.error) ||
-        "segment bulunamadı — videoyu oynatıp segmentler akarken tekrar dene";
+        t("errSegmentsHint");
       return { ok: false, error: reason, connected: isConnected() };
     }
     request.segments = resolved;
@@ -1589,7 +1592,7 @@ async function submitGrab(message, tabId, pageUrl, frameId, frameUrl) {
     if (resolved.audio) {
       // Separate tracks require browser session fetches followed by app mux.
       if (!(await ensureConnected()) || !state.features.includes("hls_audio_bytes")) {
-        return { ok: false, error: "Sesli download için Hazar uygulamasını güncelle" };
+        return { ok: false, error: t("errUpdateAudio") };
       }
       const id = crypto.randomUUID();
       // Acknowledge the popup immediately; the app reports final mux status.
@@ -1609,7 +1612,6 @@ async function submitGrab(message, tabId, pageUrl, frameId, frameUrl) {
 
 function initContextMenus() {
   if (!chrome.contextMenus) return;
-  const t = HazarI18n.t;
   const build = () => chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: "hazar-link", title: t("menuLink"), contexts: ["link", "video", "audio", "image"] });
     chrome.contextMenus.create({ id: "hazar-media", title: t("menuMedia"), contexts: ["page"] });
@@ -1711,7 +1713,7 @@ function initContentMessages() {
           extractionCache.delete(extractionKey(message.tabId, page.url)); extractorCooldowns.delete(host);
           void extractorCandidates(message.tabId, page.url);
           respond({ ok: true });
-        }).catch(() => respond({ ok: false, error: "Sekme bulunamadı" }));
+        }).catch(() => respond({ ok: false, error: t("errTabNotFound") }));
         return true;
       }
       case "status":
@@ -1758,7 +1760,7 @@ function initContentMessages() {
             message.segments,
           );
           if (!Array.isArray(segments) || segments.length === 0) {
-            const reason = (segments && segments.error) || "segment bulunamadı";
+            const reason = (segments && segments.error) || t("errSegmentNotFound");
             updateRecent({ id: streamId, state: "failed", error: reason, at: Date.now() });
             respond({ ok: false, error: reason });
             return;

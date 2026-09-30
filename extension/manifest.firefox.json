@@ -42,7 +42,8 @@
     {
       "resources": [
         "page-hook.js",
-        "recapture.html"
+        "recapture.html",
+        "icons/32x32.png"
       ],
       "matches": [
         "*://*/*"
