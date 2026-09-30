@@ -13,7 +13,7 @@
     "test:bridge": "node extension/test/bridge.test.cjs",
     "package:extension": "bash scripts/package-extension.sh",
     "bump": "bash scripts/bump-version.sh",
-    "check:extension": "node --check extension/src/background.js && node --check extension/src/content.js && node --check extension/src/popup.js && node --check extension/src/options.js && node --check extension/page-hook.js && node --check extension/recapture.js",
+    "check:extension": "node --check extension/src/background.js && node --check extension/src/content.js && node --check extension/src/popup.js && node --check extension/src/options.js && node --check extension/page-hook.js && node --check extension/recapture.js && node --check extension/src/i18n.js && node --check extension/src/locales/en.js && node --check extension/src/locales/tr.js",
     "tauri": "tauri",
     "test:matrix": "cargo run -q -p hazar-testmatrix",
     "test:matrix:browser": "cargo run -q -p hazar-testmatrix -- --browser",

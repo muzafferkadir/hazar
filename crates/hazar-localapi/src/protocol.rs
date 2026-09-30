@@ -206,7 +206,7 @@ pub enum Outbound {
         settings: Settings,
     },
     RefreshContext { id: String, url: String, page_url: Option<String>, tab_id: i64 },
-    Extracted { id: String, title: Option<String>, error: Option<hazar_engine::ytdlp::Diagnostic>, },
+    Extracted { id: String, title: Option<String>, #[serde(skip_serializing_if = "Option::is_none")] height: Option<u32>, error: Option<hazar_engine::ytdlp::Diagnostic>, },
     HelloErr {
         reason: String,
     },
@@ -271,6 +271,13 @@ pub struct Settings {
     pub schedule_from: String,
     #[serde(default = "default_schedule_to")]
     pub schedule_to: String,
+    /// UI dili (app + extension); src/locales ve extension/src/locales kodları.
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+fn default_language() -> String {
+    "en".to_string()
 }
 
 fn default_schedule_from() -> String {
@@ -293,6 +300,7 @@ impl Default for Settings {
             schedule_enabled: false,
             schedule_from: default_schedule_from(),
             schedule_to: default_schedule_to(),
+            language: default_language(),
         }
     }
 }

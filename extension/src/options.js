@@ -59,9 +59,9 @@ function save() {
 
   if (patch.ytdlp_proxy && patch.ytdlp_proxy !== "direct") {
     try { const url = new URL(patch.ytdlp_proxy); if (url.username || url.password || !["http:", "https:", "socks4:", "socks5:", "socks5h:"].includes(url.protocol)) throw new Error(); }
-    catch (_) { $("saved").textContent = "Proxy: şifresiz HTTP/SOCKS URL gir"; $("saved").style.opacity = "1"; return; }
+    catch (_) { $("saved").textContent = HazarI18n.t("optProxyInvalid"); $("saved").style.opacity = "1"; return; }
   }
-  $("saved").textContent = "kaydedildi";
+  $("saved").textContent = HazarI18n.t("optSaved");
   chrome.runtime.sendMessage({ type: "settings", patch }, () => {
     const saved = $("saved");
     saved.style.opacity = "1";
@@ -72,4 +72,6 @@ function save() {
 }
 
 $("save").addEventListener("click", save);
+HazarI18n.ready.then(() => HazarI18n.apply());
+HazarI18n.onChange(() => HazarI18n.apply());
 load();

@@ -181,7 +181,26 @@ fn guest_context(context: &BrowserContext) -> BrowserContext {
     guest
 }
 
-pub async fn probe(raw: &str, context: &BrowserContext) -> Result<Option<String>> {
+/// Analiz sonucu: başlık + indirilecek en yüksek video yüksekliği (ör. 1080).
+#[derive(Debug, Clone)]
+pub struct Probe { pub title: String, pub height: Option<u32> }
+
+/// Analizin metadata'sı download'da tekrar kullanılır; yt-dlp aynı videoyu iki kez analiz etmez.
+const INFO_TTL: Duration = Duration::from_secs(10 * 60);
+
+fn info_path(raw: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let key = canonical_url(raw).unwrap_or_else(|| raw.to_string());
+    std::env::temp_dir().join("hazar-ytdlp").join(format!("{:x}.info.json", Sha256::digest(key.as_bytes())))
+}
+
+fn fresh_info(raw: &str) -> Option<PathBuf> {
+    let path = info_path(raw);
+    let age = std::fs::metadata(&path).ok()?.modified().ok()?.elapsed().ok()?;
+    (age < INFO_TTL).then_some(path)
+}
+
+pub async fn probe(raw: &str, context: &BrowserContext) -> Result<Option<Probe>> {
     if canonical_url(raw).is_none() { return probe_once(raw, context).await; }
     let guest = guest_context(context);
     let result = probe_once(raw, &guest).await;
@@ -193,16 +212,23 @@ pub async fn probe(raw: &str, context: &BrowserContext) -> Result<Option<String>
 
 pub async fn download(url: &str, output: &Path, cancel: Arc<AtomicBool>, expected_sha256: Option<&str>, speed_limit: Option<u64>, context: &BrowserContext, progress: ProgressSender) -> Result<(u64, Option<String>)> {
     if cancel.load(Ordering::Relaxed) { return Err(Error::Cancelled); }
-    if canonical_url(url).is_none() { return download_once(url, output, cancel, expected_sha256, speed_limit, context, progress).await; }
+    if let Some(info) = fresh_info(url) {
+        match download_once(url, Some(&info), output, cancel.clone(), expected_sha256, speed_limit, context, progress.clone()).await {
+            Err(Error::Cancelled) => return Err(Error::Cancelled),
+            Err(_) => { let _ = std::fs::remove_file(&info); }
+            ok => return ok,
+        }
+    }
+    if canonical_url(url).is_none() { return download_once(url, None, output, cancel, expected_sha256, speed_limit, context, progress).await; }
     let guest = guest_context(context);
-    let result = download_once(url, output, cancel.clone(), expected_sha256, speed_limit, &guest, progress.clone()).await;
+    let result = download_once(url, None, output, cancel.clone(), expected_sha256, speed_limit, &guest, progress.clone()).await;
     if result.as_ref().err().is_some_and(|error| diagnostic(&error.to_string()).code == "login") && guest.cookies.len() < context.cookies.len() && !cancel.load(Ordering::Relaxed) {
-        return download_once(url, output, cancel, expected_sha256, speed_limit, context, progress).await;
+        return download_once(url, None, output, cancel, expected_sha256, speed_limit, context, progress).await;
     }
     result
 }
 
-async fn probe_once(raw: &str, context: &BrowserContext) -> Result<Option<String>> {
+async fn probe_once(raw: &str, context: &BrowserContext) -> Result<Option<Probe>> {
     static PROBES: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
     let semaphore = PROBES.get_or_init(|| tokio::sync::Semaphore::new(2));
     let _permit = tokio::time::timeout(Duration::from_secs(5), semaphore.acquire()).await
@@ -235,10 +261,20 @@ async fn probe_once(raw: &str, context: &BrowserContext) -> Result<Option<String
     if info["_type"].as_str().is_some_and(|kind| kind != "video") || info["is_live"].as_bool() == Some(true) { return Err(Error::Unsupported("live/playlist".into())); }
     let video = info["formats"].as_array().is_some_and(|formats| formats.iter().any(|f| f["vcodec"].as_str().is_some_and(|v| v != "none")))
         || info["vcodec"].as_str().is_some_and(|v| v != "none");
-    Ok(video.then(|| info["title"].as_str().unwrap_or("Video").chars().take(200).collect()))
+    if !video { return Ok(None); }
+    let path = info_path(raw);
+    if let Some(dir) = path.parent() { let _ = tokio::fs::create_dir_all(dir).await; }
+    let _ = tokio::fs::write(&path, &stdout).await;
+    // download --format ile aynı öncelik: önce mp4/avc1, yoksa herhangi bir video.
+    let heights = |avc: bool| info["formats"].as_array().into_iter().flatten()
+        .filter(|f| f["vcodec"].as_str().is_some_and(|v| v != "none" && (!avc || v.starts_with("avc1"))))
+        .filter_map(|f| f["height"].as_u64()).max();
+    let height = heights(true).or_else(|| heights(false)).or_else(|| info["height"].as_u64()).map(|h| h as u32);
+    Ok(Some(Probe { title: info["title"].as_str().unwrap_or("Video").chars().take(200).collect(), height }))
 }
 
-async fn download_once(url: &str, output: &Path, cancel: Arc<AtomicBool>, expected_sha256: Option<&str>, speed_limit: Option<u64>, context: &BrowserContext, progress: ProgressSender) -> Result<(u64, Option<String>)> {
+#[allow(clippy::too_many_arguments)]
+async fn download_once(url: &str, info: Option<&Path>, output: &Path, cancel: Arc<AtomicBool>, expected_sha256: Option<&str>, speed_limit: Option<u64>, context: &BrowserContext, progress: ProgressSender) -> Result<(u64, Option<String>)> {
     let parsed = url::Url::parse(url).map_err(|_| Error::Unsupported("Video linki geçersiz".into()))?;
     if !matches!(parsed.scheme(), "http" | "https") { return Err(Error::Unsupported("HTTP/HTTPS gerekli".into())); }
     let ffmpeg = std::env::var_os("HAZAR_FFMPEG").map(PathBuf::from).unwrap_or_else(|| "ffmpeg".into());
@@ -255,7 +291,7 @@ async fn download_once(url: &str, output: &Path, cancel: Arc<AtomicBool>, expect
         .arg("--output").arg(format!("{}.%(ext)s", work.join("video").display().to_string().replace('%', "%%")))
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
     if let Some(limit) = speed_limit.filter(|value| *value > 0) { command.arg("--limit-rate").arg(limit.to_string()); }
-    command.arg("--").arg(url);
+    match info { Some(info) => { command.arg("--load-info-json").arg(info); } None => { command.arg("--").arg(url); } }
     #[cfg(windows)]
     command.creation_flags(0x08000000);
     let mut child = command.spawn().map_err(|_| Error::Unsupported("yt-dlp downloader bulunamadı; Hazar'ı güncelle".into()))?;

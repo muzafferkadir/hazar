@@ -17,6 +17,9 @@
   "background": {
     "scripts": [
       "src/lib.js",
+      "src/locales/en.js",
+      "src/locales/tr.js",
+      "src/i18n.js",
       "src/background.js"
     ]
   },
@@ -26,6 +29,9 @@
         "*://*/*"
       ],
       "js": [
+        "src/locales/en.js",
+        "src/locales/tr.js",
+        "src/i18n.js",
         "src/content.js"
       ],
       "run_at": "document_start",

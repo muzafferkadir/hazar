@@ -2,7 +2,7 @@
 <html lang="tr">
   <head>
     <meta charset="UTF-8" />
-    <title>Hazar Download Manager</title>
+    <title>Hazar</title>
     <link rel="stylesheet" href="theme.css" />
     <style>
       * { box-sizing: border-box; }
@@ -15,6 +15,7 @@
       }
       header {
         display: flex;
+        white-space: nowrap;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
@@ -81,37 +82,40 @@
   </head>
   <body>
     <header>
-      <div class="brand"><img src="../icons/32x32.png" width="24" height="24" alt="" /> Hazar Download Manager <span class="dot" id="dot"></span></div>
-      <div class="dim" id="connection">bağlanıyor…</div>
+      <div class="brand"><img src="../icons/32x32.png" width="24" height="24" alt="" /> Hazar <span class="dot" id="dot"></span></div>
+      <div class="dim" id="connection" data-i18n="connecting"></div>
     </header>
 
     <section>
       <div class="row">
-        <label for="capture">İndirmeleri yakala</label>
+        <label for="capture" data-i18n="captureDownloads"></label>
         <input type="checkbox" id="capture" />
       </div>
       <div class="row">
-        <label for="group">HLS segmentlerini tek dosyada birleştir</label>
+        <label for="group" data-i18n="groupHls"></label>
         <input type="checkbox" id="group" />
       </div>
     </section>
 
     <section>
-      <h2>Bu sayfadaki medya</h2>
-      <div id="candidates"><div class="empty">Aday yok.</div></div>
+      <h2 data-i18n="pageMedia"></h2>
+      <div id="candidates"></div>
     </section>
 
     <section>
-      <h2>Son aktarımlar</h2>
-      <div id="recent"><div class="empty">Henüz aktarım yok.</div></div>
+      <h2 data-i18n="recent"></h2>
+      <div id="recent"></div>
     </section>
 
     <footer>
-      <button id="reconnect">Yeniden bağlan</button>
-      <button id="clear-recent">Listeyi temizle</button>
-      <a href="#" id="options">Ayarlar</a>
+      <button id="reconnect" data-i18n="reconnect"></button>
+      <button id="clear-recent" data-i18n="clearList"></button>
+      <a href="#" id="options" data-i18n="settings"></a>
     </footer>
 
+    <script src="locales/en.js"></script>
+    <script src="locales/tr.js"></script>
+    <script src="i18n.js"></script>
     <script src="lib.js"></script>
     <script src="popup.js"></script>
   </body>

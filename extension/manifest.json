@@ -24,6 +24,9 @@
         "*://*/*"
       ],
       "js": [
+        "src/locales/en.js",
+        "src/locales/tr.js",
+        "src/i18n.js",
         "src/content.js"
       ],
       "run_at": "document_start",

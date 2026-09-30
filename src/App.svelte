@@ -10,7 +10,7 @@
   import { locales, type Lang } from './locales'
 
   type Job = { id: string; url: string; filename: string | null; state: string; written: number; total: number; path: string | null; error: string | null }
-  type Settings = { download_dir: string | null; connections: number; max_concurrent_downloads: number; capture_enabled: boolean; min_size_bytes: number; excluded_hosts: string[]; schedule_enabled: boolean; schedule_from: string; schedule_to: string }
+  type Settings = { download_dir: string | null; connections: number; max_concurrent_downloads: number; capture_enabled: boolean; min_size_bytes: number; excluded_hosts: string[]; schedule_enabled: boolean; schedule_from: string; schedule_to: string; language: string }
   type Status = { extensionClients: number; downloadDir: string }
   let jobs = $state<Job[]>([])
   let settings = $state<Settings | null>(null)
@@ -24,11 +24,9 @@
   let updating = $state(false)
   let refreshId = $state('')
   let refreshUrl = $state('')
-  const storedLang = (() => { try { return localStorage.getItem('lang') } catch { return null } })()
-  let lang = $state<Lang>(storedLang && storedLang in locales ? storedLang as Lang : 'en')
+  const lang = $derived<Lang>(settings && settings.language in locales ? settings.language as Lang : 'en')
   const t = $derived(locales[lang].messages)
   $effect(() => { document.documentElement.lang = lang })
-  function setLang(value: Lang) { lang = value; try { localStorage.setItem('lang', value) } catch {} }
   const active = (job: Job) => ['queued', 'scheduled', 'downloading'].includes(job.state)
   const resumable = (job: Job) => ['paused', 'interrupted', 'cancelled', 'failed', 'needs_refresh'].includes(job.state)
   const size = (value: number) => {
@@ -112,7 +110,7 @@
       <div class="setting"><div><strong>{t.downloadFolder}</strong><p>{settings.download_dir ?? status?.downloadDir ?? 'Downloads'}</p></div><button onclick={folder}>{t.change}</button></div>
       <div class="setting"><label for="concurrent">{t.concurrent}</label><select id="concurrent" value={settings.max_concurrent_downloads} onchange={(e) => save({ max_concurrent_downloads: Number(e.currentTarget.value) })}>{#each [1, 2, 3, 4] as count}<option value={count}>{t.files(count)}</option>{/each}</select></div>
       <div class="setting"><label for="capture">{t.captureBrowser}</label><input id="capture" type="checkbox" checked={settings.capture_enabled} onchange={(e) => save({ capture_enabled: e.currentTarget.checked })} /></div>
-      <div class="setting"><label for="language">{t.language}</label><select id="language" value={lang} onchange={(e) => setLang(e.currentTarget.value as Lang)}>{#each Object.entries(locales) as [code, locale]}<option value={code}>{locale.name}</option>{/each}</select></div>
+      <div class="setting"><label for="language">{t.language}</label><select id="language" value={lang} onchange={(e) => save({ language: e.currentTarget.value })}>{#each Object.entries(locales) as [code, locale]}<option value={code}>{locale.name}</option>{/each}</select></div>
       <div class="setting"><div><strong>{t.extension}</strong><p>{status?.extensionClients ? t.connected : t.notConnected} · Chrome / Edge / Firefox</p></div><button onclick={exportExtension}>{t.saveExtension}</button></div>
       <p class="hint">{t.extensionHint}</p>
       <div class="setting"><span>Hazar Download Manager {version}</span><button disabled={updating} onclick={update}>{updating ? t.updating : t.checkUpdate}</button></div>

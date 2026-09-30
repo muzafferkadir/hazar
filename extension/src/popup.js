@@ -1,10 +1,12 @@
 /** Hazar Integration — toolbar popup. */
 "use strict";
 
+const t = HazarI18n.t;
+
 const send = (message) =>
   new Promise((resolve) => {
     try {
-      chrome.runtime.sendMessage(message, (response) => resolve(response || { ok: false, error: chrome.runtime.lastError?.message || "Extension yanıt vermedi" }));
+      chrome.runtime.sendMessage(message, (response) => resolve(response || { ok: false, error: chrome.runtime.lastError?.message || t("noResponse") }));
     } catch (_) {
       resolve({ ok: false });
     }
@@ -48,8 +50,8 @@ async function renderStatus() {
   dot.classList.toggle("on", !!status.connected);
   const extensionVersion = chrome.runtime.getManifest().version;
   label.textContent = status.connected
-    ? `${status.app ? status.app.app + " " + status.app.version : "bağlı"} · :${status.port} · ext ${extensionVersion}`
-    : `Hazar açık değil · ext ${extensionVersion}`;
+    ? `${status.app ? status.app.app + " " + status.app.version : t("connected")} · :${status.port} · ext ${extensionVersion}`
+    : t("appNotRunning", extensionVersion);
   capture.checked = status.settings ? status.settings.capture_enabled !== false : true;
   group.checked = status.settings ? status.settings.group_hls !== false : true;
   capture.disabled = false;
@@ -79,9 +81,9 @@ async function renderCandidates() {
 
   const container = document.getElementById("candidates");
   container.textContent = "";
-  if (response.extractor?.pending) container.append(el("div", { className: "dim", textContent: "yt-dlp analiz ediyor…" }));
+  if (response.extractor?.pending) container.append(el("div", { className: "dim", textContent: t("analyzing") }));
   if (response.extractor?.error) {
-    const retry = el("button", { textContent: "Tekrar analiz et" });
+    const retry = el("button", { textContent: t("reanalyze") });
     retry.addEventListener("click", async () => {
       retry.disabled = true;
       const result = await send({ type: "retry_extractor", tabId: tab.id });
@@ -92,7 +94,7 @@ async function renderCandidates() {
       el("div", { textContent: `yt-dlp · ${response.extractor.error.message}` }), retry]));
   }
   if (!candidates.length) {
-    container.append(el("div", { className: "empty", textContent: "Aday yok." }));
+    container.append(el("div", { className: "empty", textContent: t("noCandidates") }));
     return;
   }
 
@@ -105,13 +107,14 @@ async function renderCandidates() {
     // manifest'i tekrar çekemez, ama sniff edilmiş segmentleri doğrudan indirebilir.
     const sendable = segments.length > 0 || (!encrypted && !expired);
     const detail = [
+      candidate.height ? `${candidate.height}p` : null,
       candidate.kind,
       candidate.size ? humanBytes(candidate.size) : null,
-      candidate.isManifest ? "playlist" : null,
-      encrypted ? "tarayıcıda şifreli" : null,
-      expired ? "bağlantı süresi dolmuş" : null,
+      candidate.isManifest ? t("playlist") : null,
+      encrypted ? t("encrypted") : null,
+      expired ? t("expired") : null,
       segments.length
-        ? `${segments.length} ${candidate.isMaster ? "varyant" : "segment"}`
+        ? (candidate.isMaster ? t("variants", segments.length) : t("segments", segments.length))
         : null,
     ]
       .filter(Boolean)
@@ -122,21 +125,21 @@ async function renderCandidates() {
       className: "primary",
       textContent: sendable
         ? segments.length
-          ? `Segmentleri indir (${segments.length})`
-          : "Hazar'a gönder"
-        : "indirilemez (şifreli/süresi dolmuş)",
+          ? t("downloadSegments", segments.length)
+          : t("send")
+        : t("notDownloadable"),
     });
     if (!sendable) button.disabled = true;
 
     // Segmentler elimizdeyse oynatıcının oturumunda indirip app'e aktarırız.
-    const downloadLabel = candidate.isMaster ? `${segments.length} varyant` : `${segments.length} segment`;
+    const downloadLabel = candidate.isMaster ? t("variants", segments.length) : t("segments", segments.length);
     const frameButton = segments.length
-      ? el("button", { className: "primary", textContent: `Sayfada indir (${downloadLabel})` })
+      ? el("button", { className: "primary", textContent: t("downloadInPage", downloadLabel) })
       : null;
     if (frameButton) {
       frameButton.addEventListener("click", async () => {
         frameButton.disabled = true;
-        frameButton.textContent = "indiriliyor…";
+        frameButton.textContent = t("downloading");
         const result = await send({
           type: "save_stream",
           tabId: tab.id,
@@ -146,18 +149,18 @@ async function renderCandidates() {
           filename: candidate.filename || "stream.ts",
         });
         frameButton.textContent = result.ok
-          ? `aktarıldı (${result.segments ?? segments.length} segment)`
-          : "başarısız";
+          ? t("transferred", result.segments ?? segments.length)
+          : t("failed");
         if (!result.ok) {
           frameButton.disabled = false;
-          frameButton.textContent = `Sayfada indir (${downloadLabel})`;
+          frameButton.textContent = t("downloadInPage", downloadLabel);
         }
         setTimeout(renderRecent, 500);
       });
     }
     button.addEventListener("click", async () => {
       button.disabled = true;
-      button.textContent = "gönderildi";
+      button.textContent = t("sent");
       errorMessage.hidden = true;
       const result = await send({
         type: "grab",
@@ -171,15 +174,15 @@ async function renderCandidates() {
         segments,
       });
       if (!result.ok) {
-        button.textContent = result.connected === false ? "app kapalı" : "hata";
-        errorMessage.textContent = humanize(result.error || "Hazar request’i kabul etmedi");
+        button.textContent = result.connected === false ? t("appClosed") : t("error");
+        errorMessage.textContent = humanize(result.error || t("rejected"));
         errorMessage.hidden = false;
         button.disabled = false;
       } else {
         setTimeout(renderRecent, 400);
         // "gönderildi" durumunda takılı kalmasın.
         setTimeout(() => {
-          button.textContent = "Hazar'a gönder";
+          button.textContent = t("send");
           button.disabled = false;
         }, 4000);
       }
@@ -209,7 +212,7 @@ async function renderRecent() {
   const container = document.getElementById("recent");
   container.textContent = "";
   if (!recent.length) {
-    container.append(el("div", { className: "empty", textContent: "Henüz aktarım yok." }));
+    container.append(el("div", { className: "empty", textContent: t("noRecent") }));
     return;
   }
 
@@ -227,7 +230,7 @@ async function renderRecent() {
           className: "dim",
           textContent:
             item.state === "failed"
-              ? humanize(item.error || "hata")
+              ? humanize(item.error || t("error"))
               : `${item.state}${total ? ` · ${humanBytes(written)} / ${humanBytes(total)}` : ""}`,
         }),
         (() => {
@@ -273,7 +276,8 @@ document.getElementById("options").addEventListener("click", (event) => {
   chrome.runtime.openOptionsPage();
 });
 
-refresh();
+HazarI18n.onChange(() => { HazarI18n.apply(); rendered.clear(); refresh(); });
+HazarI18n.ready.then(() => { HazarI18n.apply(); refresh(); });
 setInterval(() => {
   renderStatus();
   renderRecent();

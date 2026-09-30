@@ -337,11 +337,11 @@ impl CaptureState {
                         Ok(result) => result,
                         Err(_) => Err(hazar_engine::Error::Protocol("yt-dlp analiz timeout".into())),
                     };
-                    let (title, error) = match result {
-                        Ok(title) => (title, None),
-                        Err(error) => (None, Some(hazar_engine::ytdlp::diagnostic(&error.to_string()))),
+                    let (title, height, error) = match result {
+                        Ok(probe) => (probe.as_ref().map(|p| p.title.clone()), probe.and_then(|p| p.height), None),
+                        Err(error) => (None, None, Some(hazar_engine::ytdlp::diagnostic(&error.to_string()))),
                     };
-                    state.broadcast(Outbound::Extracted { id: grab.id, title, error });
+                    state.broadcast(Outbound::Extracted { id: grab.id, title, height, error });
                 });
             }
             Inbound::Context(reply) => {

@@ -209,4 +209,12 @@ test("humanizeError shows which url returned 403 (without the query/token)", () 
   assert.equal(lib.urlLabelOf("status 403"), null);
 });
 
+test("every locale has the same keys as en", () => {
+  const fs = require("fs");
+  const dir = require("path").join(__dirname, "../src/locales");
+  for (const file of fs.readdirSync(dir)) require(`${dir}/${file}`);
+  const en = Object.keys(globalThis.HazarLocales.en).sort();
+  for (const [code, messages] of Object.entries(globalThis.HazarLocales)) assert.deepEqual(Object.keys(messages).sort(), en, code);
+});
+
 console.log(`\n${passed} test(s) passed`);

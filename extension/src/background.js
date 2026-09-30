@@ -14,7 +14,7 @@
 
 if (typeof importScripts === "function" && typeof HazarLib === "undefined") {
   try {
-    importScripts("lib.js");
+    importScripts("lib.js", "locales/en.js", "locales/tr.js", "i18n.js");
   } catch (error) {
     console.error("hazar: could not load lib.js", error);
   }
@@ -375,24 +375,26 @@ const chunkAcks = new Map();
 const extractionReplies = new Map();
 const extractionCache = new Map();
 const extractorCooldowns = new Map();
+// Aynı video tek sefer analiz edilir: YouTube'da &t=, &pp=, embed/shorts varyantları aynı anahtara düşer.
+const extractionKey = (tabId, pageUrl) => `${tabId}:${Lib.youtubeVideoUrl(pageUrl) || pageUrl}`;
 async function extractorCandidates(tabId, pageUrl) {
   if (!state.settings.capture_enabled || !/^https?:/i.test(pageUrl || "")) return [];
   const host = new URL(pageUrl).hostname;
   if ((state.settings.excluded_hosts || []).some(h => host === h || host.endsWith(`.${h}`))) return [];
   if (!(await ensureConnected()) || !state.features.includes("ytdlp")) return [];
   if (!state.features.includes("ytdlp_context")) {
-    extractionCache.set(`${tabId}:${pageUrl}`, { settled: true, items: [], error: { code: "update", message: "Yeni yt-dlp entegrasyonu için Hazar’ı yeniden aç.", retry_after: 0 } });
+    extractionCache.set(extractionKey(tabId, pageUrl), { settled: true, items: [], error: { code: "update", message: "Yeni yt-dlp entegrasyonu için Hazar’ı yeniden aç.", retry_after: 0 } });
     return [];
   }
   const cooldown = extractorCooldowns.get(host);
-  const key = `${tabId}:${pageUrl}`;
+  const key = extractionKey(tabId, pageUrl);
   if (cooldown && cooldown.until > Date.now()) {
     const current = extractionCache.get(key);
     if (!current) extractionCache.set(key, { at: Date.now(), items: [], error: cooldown.error, settled: true, promise: Promise.resolve([]) });
     return current?.items || [];
   }
   const cached = extractionCache.get(key);
-  if (cached && Date.now() - cached.at < (cached.items?.length ? 600000 : 300000)) return cached.promise;
+  if (cached && (!cached.settled || cached.items?.length || Date.now() - cached.at < 300000)) return cached.promise;
   const promise = (async () => {
     const request = await buildRequest({ url: pageUrl, kind: "file", tabId, pageUrl });
     await attachExtractorContext(request, tabId);
@@ -405,7 +407,9 @@ async function extractorCandidates(tabId, pageUrl) {
       }
     });
     const title = reply?.title;
-    const items = title ? [{ url: pageUrl, kind: "file", extractor: "ytdlp", label: `yt-dlp · ${title}`,
+    const height = Number(reply?.height) || null;
+    const items = title ? [{ url: pageUrl, kind: "file", extractor: "ytdlp", height,
+      label: height ? `yt-dlp · ${height}p · ${title}` : `yt-dlp · ${title}`,
       filename: Lib.sanitizeFilename(`${title}.mp4`), pageUrl }] : [];
     const entry = extractionCache.get(key); if (entry) { entry.items = items; entry.error = reply?.error || null; entry.settled = true; }
     if (reply?.error?.retry_after) {
@@ -425,7 +429,7 @@ async function extractorCandidates(tabId, pageUrl) {
 async function combinedVideoCandidates(tabId, frameId, mediaUrl, pageUrl) {
   // The native options remain visible while the independent extractor works.
   void extractorCandidates(tabId, pageUrl);
-  const cached = extractionCache.get(`${tabId}:${pageUrl}`);
+  const cached = extractionCache.get(extractionKey(tabId, pageUrl));
   return [...videoCandidates(tabId, frameId, mediaUrl, pageUrl), ...(cached?.items || [])];
 }
 
@@ -1605,22 +1609,15 @@ async function submitGrab(message, tabId, pageUrl, frameId, frameUrl) {
 
 function initContextMenus() {
   if (!chrome.contextMenus) return;
-  chrome.runtime.onInstalled.addListener(() => {
-    chrome.contextMenus.removeAll(() => {
-      chrome.contextMenus.create({
-        id: "hazar-link",
-        title: "Hazar ile indir",
-        contexts: ["link", "video", "audio", "image"],
-      });
-      chrome.contextMenus.create({
-        id: "hazar-media",
-        title: "Bu videoyu Hazar ile indir",
-        contexts: ["page"],
-      });
-      chrome.contextMenus.create({ id: "hazar-links", title: "Download linklerini Hazar'a gönder", contexts: ["page"] });
-      chrome.contextMenus.create({ id: "hazar-selection", title: "Seçili download linklerini Hazar'a gönder", contexts: ["selection"] });
-    });
+  const t = HazarI18n.t;
+  const build = () => chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: "hazar-link", title: t("menuLink"), contexts: ["link", "video", "audio", "image"] });
+    chrome.contextMenus.create({ id: "hazar-media", title: t("menuMedia"), contexts: ["page"] });
+    chrome.contextMenus.create({ id: "hazar-links", title: t("menuLinks"), contexts: ["page"] });
+    chrome.contextMenus.create({ id: "hazar-selection", title: t("menuSelection"), contexts: ["selection"] });
   });
+  chrome.runtime.onInstalled.addListener(() => { void HazarI18n.ready.then(build); });
+  HazarI18n.onChange(build);
 
   chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (!tab?.id) return;
@@ -1700,9 +1697,9 @@ function initContentMessages() {
         const id = message.tabId ?? tabId;
         pageInfo(id).then(page => {
           void extractorCandidates(id, page.url);
-          const extra = extractionCache.get(`${id}:${page.url}`)?.items || [];
+          const extra = extractionCache.get(extractionKey(id, page.url))?.items || [];
           respond({ ok: true, candidates: [...candidatesFor(id).filter(c => !Lib.youtubeVideoUrl(c.url)), ...extra],
-            extractor: extractionCache.get(`${id}:${page.url}`) ? { pending: !extractionCache.get(`${id}:${page.url}`).settled, error: extractionCache.get(`${id}:${page.url}`).error || null } : null });
+            extractor: extractionCache.get(extractionKey(id, page.url)) ? { pending: !extractionCache.get(extractionKey(id, page.url)).settled, error: extractionCache.get(extractionKey(id, page.url)).error || null } : null });
         }).catch(() => respond({ ok: true, candidates: candidatesFor(id) }));
         return true;
       }
@@ -1711,7 +1708,7 @@ function initContentMessages() {
           const host = page.url ? new URL(page.url).hostname : "";
           const cooldown = extractorCooldowns.get(host);
           if (cooldown && cooldown.until > Date.now() && cooldown.error.code === "rate_limit") { respond({ ok: false, error: cooldown.error.message }); return; }
-          extractionCache.delete(`${message.tabId}:${page.url}`); extractorCooldowns.delete(host);
+          extractionCache.delete(extractionKey(message.tabId, page.url)); extractorCooldowns.delete(host);
           void extractorCandidates(message.tabId, page.url);
           respond({ ok: true });
         }).catch(() => respond({ ok: false, error: "Sekme bulunamadı" }));
