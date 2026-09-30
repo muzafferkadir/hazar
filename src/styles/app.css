@@ -307,6 +307,32 @@ select,
     margin: 0;
 }
 
+/* Number input'lar native görünümü koruduğu için `height`'i yok sayıp ince
+   kalıyordu (text input ile aynı hizada değildi). Görünümü kapatıp yüksekliği
+   zorluyoruz; spin okları da kaldırılıyor. */
+input.file-input[type="number"],
+input.number-input[type="number"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: var(--control-h);
+    min-height: var(--control-h);
+    line-height: normal;
+}
+
+input.file-input[type="number"]::-webkit-outer-spin-button,
+input.file-input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Tüm metin/number input'ları aynı yüksekliğe sabitle (son söz). */
+input.file-input,
+input.number-input {
+    height: var(--control-h);
+    min-height: var(--control-h);
+    box-sizing: border-box;
+}
+
 .select-input {
     cursor: pointer;
     appearance: none;
