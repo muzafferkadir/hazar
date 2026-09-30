@@ -40,6 +40,11 @@
     if (!data || data.source !== SOURCE) return;
     if (data.kind === "segment" || data.kind === "manifest") {
       send({ type: "page-hook", payload: { kind: data.kind, url: data.url, mime: data.mime } });
+    } else if (data.kind === "manifest-body") {
+      send({
+        type: "page-hook",
+        payload: { kind: "manifest-body", url: data.url, mime: data.mime, body: data.body },
+      });
     }
   });
 

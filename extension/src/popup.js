@@ -10,6 +10,19 @@ const send = (message) =>
     }
   });
 
+/** Ham motor hatalarını kullanıcıya anlaşılır cümleye çevirir (app ile aynı mantık). */
+function humanize(message) {
+  if (/404/.test(message) && /\.m3u8|\.mpd/.test(message)) {
+    return "bağlantının süresi dolmuş (oynatıcı tek kullanımlık token) — videoyu oynatıp tekrar gönder";
+  }
+  if (/not an HLS playlist/.test(message)) {
+    return "stream tarayıcıda şifreli çözülüyor — indirilemiyor";
+  }
+  if (/SAMPLE-AES|widevine|playready/i.test(message)) return "DRM korumalı — indirilemiyor";
+  if (/timed out|timeout/i.test(message)) return "zaman aşımı";
+  return message;
+}
+
 function humanBytes(bytes) {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let value = Number(bytes) || 0;
@@ -82,11 +95,16 @@ async function renderCandidates() {
     const segments = candidate.segments || candidate.streams || [];
     const name = candidate.filename || candidate.url.split("/").pop() || candidate.url;
     const encrypted = Boolean(candidate.encrypted);
+    const expired = Boolean(candidate.expired);
+    // Yalnızca segment listesi varsa gönderilebilir: token tek kullanımlıksa app
+    // manifest'i tekrar çekemez, ama sniff edilmiş segmentleri doğrudan indirebilir.
+    const sendable = segments.length > 0 || (!encrypted && !expired);
     const detail = [
       candidate.kind,
       candidate.size ? humanBytes(candidate.size) : null,
       candidate.isManifest ? "playlist" : null,
       encrypted ? "tarayıcıda şifreli" : null,
+      expired ? "bağlantı süresi dolmuş" : null,
       segments.length ? `${segments.length} segment` : null,
     ]
       .filter(Boolean)
@@ -94,9 +112,13 @@ async function renderCandidates() {
 
     const button = el("button", {
       className: "primary",
-      textContent: encrypted ? "şifreli (indirilemez)" : "Hazar'a gönder",
+      textContent: sendable
+        ? segments.length
+          ? `Segmentleri indir (${segments.length})`
+          : "Hazar'a gönder"
+        : "indirilemez (şifreli/süresi dolmuş)",
     });
-    if (encrypted) button.disabled = true;
+    if (!sendable) button.disabled = true;
     button.addEventListener("click", async () => {
       button.disabled = true;
       button.textContent = "gönderildi";
@@ -162,7 +184,7 @@ async function renderRecent() {
           className: "dim",
           textContent:
             item.state === "failed"
-              ? item.error || "hata"
+              ? humanize(item.error || "hata")
               : `${item.state}${total ? ` · ${humanBytes(written)} / ${humanBytes(total)}` : ""}`,
         }),
         (() => {

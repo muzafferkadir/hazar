@@ -14,12 +14,22 @@
   const SEGMENT = /\.(ts|m4s|m4v|m4a|aac|cmfv|cmfa)(\?|#|$)/i;
   const MANIFEST_MIME = /(mpegurl|dash\+xml|octet-stream-m3u8)/i;
 
-  function post(kind, url, mime) {
+  function post(kind, url, mime, body) {
     try {
-      window.postMessage({ source: SOURCE, kind, url: String(url), mime: mime || null }, "*");
+      window.postMessage(
+        { source: SOURCE, kind, url: String(url), mime: mime || null, body: body || null },
+        "*",
+      );
     } catch (_) {
       /* ignore */
     }
+  }
+
+  /** Manifest yanıtının gövdesini de bildir: token tek kullanımlıksa app tekrar
+   *  çekemiyor, ama gövde elimizde olursa segmentleri ondan çıkarabiliriz. */
+  function reportManifestBody(url, mime, text) {
+    if (typeof text !== "string" || text.length === 0 || text.length > 512 * 1024) return;
+    post("manifest-body", url, mime, text);
   }
 
   function classify(url, mime) {
@@ -65,6 +75,9 @@
                 const mime = this.getResponseHeader && this.getResponseHeader("content-type");
                 const kind = classify(url, mime);
                 if (kind) post(kind, url, mime);
+                if (kind === "manifest" && typeof this.responseText === "string") {
+                  reportManifestBody(url, mime, this.responseText);
+                }
               } catch (_) {
                 /* ignore */
               }
@@ -96,6 +109,13 @@
                   const mime = response && response.headers && response.headers.get("content-type");
                   const kind = classify(url, mime);
                   if (kind) post(kind, url, mime);
+                  if (kind === "manifest" && response && typeof response.clone === "function") {
+                    response
+                      .clone()
+                      .text()
+                      .then((text) => reportManifestBody(url, mime, text))
+                      .catch(() => {});
+                  }
                 } catch (_) {
                   /* ignore */
                 }

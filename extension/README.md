@@ -44,6 +44,23 @@ Eklenti tarayıcı tarayıcı elle güncellenir: yeni zip'i indir, aynı klasör
 (üzerine yaz), sonra `chrome://extensions` → eklenti kartında **Yenile**.
 Uygulama (Hazar.app) kendi kendini günceller (updater `latest.json` okur).
 
+## Yakalanan stream inmediyse
+
+Bazı oynatıcılar manifest'i **tek kullanımlık token** ile ve/veya **tarayıcıda şifreli**
+şekilde servis eder. Eklenti bu durumda şunu yapar:
+
+1. Oynatıcının kendi `m3u8` isteğinin **yanıt gövdesini** yakalar (`page-hook`).
+2. Gövde düz metin (`#EXTM3U`) ise **segment listesini** çıkarır → popup'ta
+   **"Segmentleri indir (N)"** görünür. Bu yolu kullan: app manifest'i tekrar istemez,
+   segmentleri doğrudan indirir (tek kullanımlık token sorunu ortadan kalkar).
+3. Gövde playlist değilse (HTML/şifreli) aday **"indirilemez (şifreli/süresi dolmuş)"**
+   olarak işaretlenir ve buton kapalıdır — o stream'i ancak oynatıcının kendi JS'i çözer.
+4. Manifest isteği `404` dönerse (token tüketilmiş) aday "bağlantı süresi dolmuş" olur.
+
+**Pratik akış:** videoyu oynatmaya başla (oynatıcı segmentleri istemeye başlar) → eklenti
+simgesine tıkla → aday "Segmentleri indir (N)" ise onu kullan; "indirilemez" ise o sitenin
+stream'i client-side şifreli demektir (indirme kapsam dışı).
+
 ## Sorun giderme
 
 | belirti | çözüm |

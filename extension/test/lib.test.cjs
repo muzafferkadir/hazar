@@ -122,4 +122,24 @@ test("hostMatches supports wildcards and bare domains", () => {
   assert.equal(lib.hostMatches("notexample.com", "example.com"), false);
 });
 
+test("segmentsFromPlaylist resolves absolute and relative URLs", () => {
+  const playlist = [
+    "#EXTM3U",
+    "#EXT-X-TARGETDURATION:6",
+    "#EXTINF:6,",
+    "seg1.ts",
+    "#EXTINF:6,",
+    "/vod/seg2.ts?t=1",
+    "#EXTINF:6,",
+    "https://cdn.example/seg3.ts",
+    "#EXT-X-ENDLIST",
+    "",
+  ].join(String.fromCharCode(10));
+  assert.deepEqual(
+    lib.segmentsFromPlaylist(playlist, "https://cdn.example/vod/index.m3u8"),
+    ["https://cdn.example/vod/seg1.ts", "https://cdn.example/vod/seg2.ts?t=1", "https://cdn.example/seg3.ts"],
+  );
+  assert.deepEqual(lib.segmentsFromPlaylist("<html>nope</html>", "https://x/"), []);
+});
+
 console.log(`\n${passed} test(s) passed`);

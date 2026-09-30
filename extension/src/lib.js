@@ -205,6 +205,26 @@
     return out;
   }
 
+  /**
+   * Bir m3u8 gövdesinden segment URL'lerini çıkarır (yorumlar/etiketler hariç).
+   * Göreli URL'ler `baseUrl`e göre çözülür.
+   */
+  function segmentsFromPlaylist(text, baseUrl) {
+    const source = String(text || "");
+    if (!source.trimStart().startsWith("#EXTM3U")) return [];
+    const out = [];
+    for (const raw of source.split(String.fromCharCode(10))) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      try {
+        out.push(new URL(line, baseUrl).toString());
+      } catch (_) {
+        /* bozuk satırı atla */
+      }
+    }
+    return out;
+  }
+
   /** Trailing number of a segment URL; used for ordering. */
   function segmentIndex(url) {
     const path = pathOf(url);
@@ -269,6 +289,7 @@
     outputName,
     cookieHeader,
     groupSegments,
+    segmentsFromPlaylist,
     segmentIndex,
     bestStream,
     forwardableHeaders,

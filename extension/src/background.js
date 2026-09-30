@@ -173,6 +173,8 @@ globalThis.__hazarCandidates = async (tabIdOrUrl) => {
         pageUrl: candidate.pageUrl || null,
         frameUrl: candidate.frameUrl || null,
         encrypted: !!candidate.encrypted,
+        expired: !!candidate.expired,
+        status: candidate.status || null,
         segments: candidate.segments || grouped || null,
         tabId: Number(key),
       });
@@ -654,7 +656,16 @@ async function noteManifest(url, item) {
   // Pull the playlist so the app can download without re-fetching cookies.
   try {
     const response = await fetch(url, { credentials: "include" });
-    if (!response.ok) return;
+    if (!response.ok) {
+      // Tipik olarak tek kullanımlık token: oynatıcı zaten tüketti → herkes 404 alır.
+      const candidate = findCandidate(tabId, url);
+      if (candidate) {
+        candidate.expired = true;
+        candidate.status = response.status;
+      }
+      debug("manifest fetch failed (single-use token?)", response.status, url);
+      return;
+    }
     const text = await response.text();
     if (!text.startsWith("#EXTM3U")) {
       // Playlist düz metin değil (HTML/şifreli gövde) → oynatıcı bunu JS'te çözüyor,
@@ -667,18 +678,7 @@ async function noteManifest(url, item) {
       debug("manifest is not plaintext (client-side encrypted?)", url);
       return;
     }
-    const segments = text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"))
-      .map((line) => {
-        try {
-          return new URL(line, url).toString();
-        } catch (_) {
-          return null;
-        }
-      })
-      .filter(Boolean);
+    const segments = Lib.segmentsFromPlaylist(text, url);
     for (const segment of segments) noteSegment(tabId, segment, item.pageUrl);
     const candidate = findCandidate(tabId, url);
     if (candidate) {
@@ -687,6 +687,35 @@ async function noteManifest(url, item) {
     }
   } catch (error) {
     console.debug("hazar: playlist fetch failed", error);
+  }
+}
+
+/** Oynatıcının kendi manifest yanıtı: düz metinse segmentleri çıkar, değilse işaretle. */
+function handleManifestBody(tabId, url, body, pageUrl) {
+  if (!url || typeof body !== "string") return;
+  const text = body.trimStart();
+  const plaintext = text.startsWith("#EXTM3U");
+  let candidate = findCandidate(tabId, url) || findCandidateByUrl(url);
+  if (!candidate) {
+    candidate = { url, kind: Lib.pickKind(url, null), mime: null, pageUrl };
+    addCandidate(tabId, candidate);
+    candidate = findCandidate(tabId, url) || findCandidateByUrl(url);
+  }
+  if (!candidate) return;
+
+  if (!plaintext) {
+    candidate.encrypted = true;
+    debug("manifest body is not a playlist (client-side encrypted)", url);
+    return;
+  }
+
+  const segments = Lib.segmentsFromPlaylist(text, url);
+  if (segments.length) {
+    candidate.segments = segments;
+    candidate.manifest = body;
+    candidate.encrypted = false;
+    candidate.expired = false;
+    debug("manifest body captured:", segments.length, "segment(ler)", url);
   }
 }
 
@@ -941,6 +970,11 @@ function initContentMessages() {
 
     switch (message && message.type) {
       case "page-hook":
+        if (message.payload && message.payload.kind === "manifest-body") {
+          handleManifestBody(tabId, message.payload.url, message.payload.body, pageUrl);
+          respond({ ok: true });
+          return true;
+        }
         if (message.payload && message.payload.kind === "segment") {
           noteSegment(tabId, message.payload.url, pageUrl);
         } else if (message.payload && message.payload.kind === "manifest") {
