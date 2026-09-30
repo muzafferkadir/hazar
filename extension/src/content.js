@@ -26,6 +26,37 @@
     }
   }
 
+  /** Base64'e çevir (büyük gövdelerde parça parça, stack taşmasın). */
+  function toBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunk = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(index, index + chunk));
+    }
+    return btoa(binary);
+  }
+
+  // Background, segmenti oynatıcının kendi frame'inde indirmek ister: burada
+  // fetch çalıştığı için isteğin Referer'ı ve çerezleri oynatıcınınkiyle aynı olur.
+  chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+    if (!message || message.type !== "fetch_bytes") return false;
+    (async () => {
+      try {
+        const response = await fetch(message.url, { credentials: "include" });
+        if (!response.ok) {
+          respond({ ok: false, status: response.status });
+          return;
+        }
+        const buffer = await response.arrayBuffer();
+        respond({ ok: true, base64: toBase64(buffer), bytes: buffer.byteLength });
+      } catch (error) {
+        respond({ ok: false, error: String(error) });
+      }
+    })();
+    return true; // async yanıt
+  });
+
   function send(message) {
     try {
       chrome.runtime.sendMessage(message);

@@ -152,6 +152,7 @@ Reproduce the release smoke test against the installed app:
 open -a Hazar                                    # köprü 127.0.0.1:8722'de dinlemeye başlar
 node tools/app-e2e.mjs                           # hello → 2 eşzamanlı grab (biri hız limitli) → sha256 → iptal
 node tools/extension-check.mjs                   # kurulu app'in içindeki eklentiyi headless Chrome'a yükler, bağlantıyı doğrular
+node tools/app-capture-e2e.mjs                   # "Sayfada indir" bayt akışı: 3 parça → birleştirme + sha256
 ```
 
 `app-e2e.mjs` gerçek bir dosyayı indirir (`/tmp/hz-e2e`) ve referans SHA-256 ile

@@ -172,6 +172,7 @@ globalThis.__hazarCandidates = async (tabIdOrUrl) => {
         isManifest: !!candidate.isManifest,
         pageUrl: candidate.pageUrl || null,
         frameUrl: candidate.frameUrl || null,
+        frameId: typeof candidate.frameId === "number" ? candidate.frameId : null,
         encrypted: !!candidate.encrypted,
         expired: !!candidate.expired,
         status: candidate.status || null,
@@ -555,6 +556,7 @@ function initWebRequest() {
       // The frame that made the request: a player CDN usually expects the
       // *player's* URL as Referer, not the top page.
       item.frameUrl = details.documentUrl || details.initiator || item.frameUrl;
+      item.frameId = details.frameId;
       state.byUrl.set(details.url, { ...item, at: Date.now() });
       if (state.byUrl.size > 4000) pruneByUrl();
 
@@ -596,6 +598,7 @@ function initWebRequest() {
             disposition: item.disposition,
           }),
           frameUrl: item.frameUrl || null,
+          frameId: typeof item.frameId === "number" ? item.frameId : null,
         });
       }
     },
@@ -928,6 +931,42 @@ async function maybeTakeOverDownload(item) {
   }
 }
 
+/** Segmenti, manifesti gördüğümüz frame'de indirir (Referer/çerez oynatıcınınki). */
+async function fetchInFrame(tabId, url, frameId) {
+  const ask = (options) =>
+    new Promise((resolve) => {
+      try {
+        chrome.tabs.sendMessage(tabId, { type: "fetch_bytes", url }, options, (response) =>
+          resolve(response || { ok: false, error: "content script yok" }),
+        );
+      } catch (error) {
+        resolve({ ok: false, error: String(error) });
+      }
+    });
+
+  if (typeof frameId === "number") {
+    const inFrame = await ask({ frameId });
+    if (inFrame.ok) return inFrame;
+  }
+  const anyFrame = await ask();
+  if (anyFrame.ok) return anyFrame;
+
+  // Son çare: background'dan indir (bazı CDN'ler bunu kabul eder).
+  try {
+    const response = await fetch(url, { credentials: "include" });
+    if (!response.ok) return { ok: false, status: response.status };
+    const buffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 0x8000) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(index, index + 0x8000));
+    }
+    return { ok: true, base64: btoa(binary) };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+}
+
 function initContextMenus() {
   if (!chrome.contextMenus) return;
   chrome.runtime.onInstalled.addListener(() => {
@@ -1040,6 +1079,43 @@ function initContentMessages() {
         connect();
         respond({ ok: true });
         return true;
+      case "save_stream": {
+        // Segmentleri oynatıcının kendi frame'inde indir, baytları app'e aktar.
+        const streamId = `cap-${Date.now().toString(36)}`;
+        const segments = message.segments || [];
+        const filename = message.filename || "stream.ts";
+        const frameId = typeof message.frameId === "number" ? message.frameId : undefined;
+        updateRecent({ id: streamId, state: "capturing", written: 0, total: segments.length, at: Date.now() });
+        (async () => {
+          for (let index = 0; index < segments.length; index += 1) {
+            const result = await fetchInFrame(message.tabId, segments[index], frameId);
+            if (!result || !result.ok) {
+              const reason = result && result.status ? `status ${result.status}` : (result && result.error) || "bilinmeyen hata";
+              updateRecent({ id: streamId, state: "failed", error: `segment ${index + 1}: ${reason}`, at: Date.now() });
+              respond({ ok: false, error: reason });
+              return;
+            }
+            const sent = send({
+              type: "bytes",
+              session: state.session,
+              stream_id: streamId,
+              index,
+              total: segments.length,
+              url: segments[index],
+              filename,
+              data_b64: result.base64,
+            });
+            if (!sent) {
+              updateRecent({ id: streamId, state: "failed", error: "app bağlı değil", at: Date.now() });
+              respond({ ok: false, error: "app bağlı değil" });
+              return;
+            }
+            updateRecent({ id: streamId, state: "capturing", written: index + 1, total: segments.length, at: Date.now() });
+          }
+          respond({ ok: true, segments: segments.length });
+        })();
+        return true;
+      }
       case "recapture": {
         // Redirect the next navigation to our recapture page so the app can
         // refresh an expired session, then fall back to the page.

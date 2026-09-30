@@ -18,6 +18,8 @@ pub enum Inbound {
     Cancel(Cancel),
     Media(MediaCandidates),
     Ping(Ping),
+    /// Oynatıcı oturumunda indirilen segment gövdesi (tek kullanımlık token sorununu atlar).
+    Bytes(Bytes),
 }
 
 impl Inbound {
@@ -28,6 +30,7 @@ impl Inbound {
             Inbound::Cancel(m) => m.session.as_deref(),
             Inbound::Media(m) => m.session.as_deref(),
             Inbound::Ping(m) => m.session.as_deref(),
+            Inbound::Bytes(m) => m.session.as_deref(),
         }
     }
 }
@@ -64,6 +67,22 @@ pub struct MediaCandidates {
     #[serde(default)]
     pub tab_id: i64,
     pub items: Vec<MediaCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Bytes {
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Aynı yakalama işinin tüm parçalarını gruplar.
+    pub stream_id: String,
+    pub index: u32,
+    pub total: u32,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub filename: Option<String>,
+    /// base64 gövde.
+    pub data_b64: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

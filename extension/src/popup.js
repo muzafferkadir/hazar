@@ -123,6 +123,31 @@ async function renderCandidates() {
         : "indirilemez (şifreli/süresi dolmuş)",
     });
     if (!sendable) button.disabled = true;
+
+    // Segmentler elimizdeyse oynatıcının oturumunda indirip app'e aktarırız.
+    const frameButton = segments.length
+      ? el("button", { className: "primary", textContent: `Sayfada indir (${segments.length})` })
+      : null;
+    if (frameButton) {
+      frameButton.addEventListener("click", async () => {
+        frameButton.disabled = true;
+        frameButton.textContent = "indiriliyor…";
+        const result = await send({
+          type: "save_stream",
+          tabId: tab.id,
+          frameId: candidate.frameId ?? null,
+          url: candidate.url,
+          segments,
+          filename: candidate.filename || "stream.ts",
+        });
+        frameButton.textContent = result.ok ? `aktarıldı (${segments.length})` : "başarısız";
+        if (!result.ok) {
+          frameButton.disabled = false;
+          frameButton.textContent = `Sayfada indir (${segments.length})`;
+        }
+        setTimeout(renderRecent, 500);
+      });
+    }
     button.addEventListener("click", async () => {
       button.disabled = true;
       button.textContent = "gönderildi";
@@ -156,7 +181,7 @@ async function renderCandidates() {
           ]),
           el("div", { className: "dim", textContent: detail }),
         ]),
-        button,
+        el("div", { className: "row-actions" }, [frameButton, button].filter(Boolean)),
       ]),
     );
   }

@@ -17,7 +17,8 @@
     "test:matrix": "cargo run -q -p hazar-testmatrix",
     "test:matrix:browser": "cargo run -q -p hazar-testmatrix -- --browser",
     "e2e:app": "node tools/app-e2e.mjs",
-    "e2e:extension": "node tools/extension-check.mjs"
+    "e2e:extension": "node tools/extension-check.mjs",
+    "e2e:capture": "node tools/app-capture-e2e.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.0",

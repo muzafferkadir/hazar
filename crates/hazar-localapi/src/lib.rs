@@ -9,7 +9,7 @@ pub mod protocol;
 pub mod server;
 
 pub use protocol::{
-    Grab, GrabKind, GrabRequest, Hello, Inbound, MediaCandidate, MediaCandidates, Outbound,
-    QueueItem, Settings, SUBPROTOCOL,
+    Bytes, Grab, GrabKind, GrabRequest, Hello, Inbound, MediaCandidate, MediaCandidates, Outbound,
+    Ping, QueueItem, Settings, SUBPROTOCOL,
 };
 pub use server::{ApiError, ClientMessage, LocalApiConfig, ServerHandle};

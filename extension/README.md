@@ -57,6 +57,13 @@ Bazı oynatıcılar manifest'i **tek kullanımlık token** ile ve/veya **tarayı
    olarak işaretlenir ve buton kapalıdır — o stream'i ancak oynatıcının kendi JS'i çözer.
 4. Manifest isteği `404` dönerse (token tüketilmiş) aday "bağlantı süresi dolmuş" olur.
 
+**En sağlam yol — "Sayfada indir":** segmentler elimizdeyse popup'ta
+**"Sayfada indir (N)"** butonu çıkar. Eklenti segmentleri **oynatıcının kendi
+frame'inde** indirir (Referer/çerez oynatıcınınkiyle aynı olur) ve baytları app'e
+aktarır; app parçaları birleştirip dosyayı yazar. Böylece app'in URL'i dışarıdan
+tekrar istemesi (tek kullanımlık token → 403/404) tamamen atlanır. IDM'in kernel
+driver'ı ile yaptığı işin tarayıcı içi karşılığı budur.
+
 **Pratik akış:** videoyu oynatmaya başla (oynatıcı segmentleri istemeye başlar) → eklenti
 simgesine tıkla → aday "Segmentleri indir (N)" ise onu kullan; "indirilemez" ise o sitenin
 stream'i client-side şifreli demektir (indirme kapsam dışı).

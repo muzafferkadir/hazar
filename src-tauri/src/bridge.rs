@@ -250,6 +250,9 @@ impl CaptureState {
                     state.emit_queue(app);
                 }
             }
+            Inbound::Bytes(bytes) => {
+                on_bytes(state, app, bytes);
+            }
             Inbound::Media(_) | Inbound::Ping(_) => {}
         }
     }
@@ -645,6 +648,163 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
 
     state.emit_queue(&app);
     state.emit_status(&app);
+}
+
+/// Tarayıcıdan gelen segment gövdesini diske yazar; son parçada birleştirir.
+fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::Bytes) {
+    let settings = state.settings();
+    let dir = settings.download_dir.clone().unwrap_or_else(default_download_dir);
+    let name = bytes
+        .filename
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("{}.ts", bytes.stream_id));
+    let name = sanitize(&name);
+    let stream_dir = Path::new(&dir).join(format!(".{}.capture", bytes.stream_id));
+
+    if let Err(error) = std::fs::create_dir_all(&stream_dir) {
+        eprintln!("hazar: capture dir failed: {error}");
+        return;
+    }
+
+    let Some(data) = base64_decode(&bytes.data_b64) else {
+        eprintln!("hazar: bad base64 chunk for {}", bytes.stream_id);
+        return;
+    };
+    let part = stream_dir.join(format!("part-{:05}.bin", bytes.index));
+    if let Err(error) = std::fs::write(&part, &data) {
+        eprintln!("hazar: capture write failed: {error}");
+        return;
+    }
+
+    // Kuyruk girdisi (ilk parçada oluştur).
+    if bytes.index == 0 {
+        state.queue.lock().expect("queue lock").upsert(QueueEntry {
+            id: bytes.stream_id.clone(),
+            url: bytes.url.clone().unwrap_or_default(),
+            kind: "hls".to_string(),
+            state: "downloading".into(),
+            source: "browser-capture".into(),
+            written: 0,
+            total: 0,
+            filename: Some(name.clone()),
+            path: None,
+            error: None,
+        });
+    }
+
+    let written = state
+        .queue
+        .lock()
+        .expect("queue lock")
+        .snapshot()
+        .iter()
+        .find(|entry| entry.id == bytes.stream_id)
+        .map(|entry| entry.written)
+        .unwrap_or(0)
+        + data.len() as u64;
+    state.update(&bytes.stream_id, |entry| entry.written = written);
+    state.broadcast(Outbound::Progress {
+        id: bytes.stream_id.clone(),
+        phase: "browser-capture".to_string(),
+        written,
+        total: 0,
+        connections: 1,
+        speed_bps: 0,
+    });
+    state.emit_queue(app);
+
+    // Son parça geldiyse sırayla birleştir.
+    let done = (bytes.index + 1) >= bytes.total;
+    if !done {
+        return;
+    }
+
+    let mut out_path = Path::new(&dir).join(&name);
+    let mut counter = 1;
+    while out_path.exists() && counter < 1000 {
+        out_path = Path::new(&dir).join(format!("{}-{counter}.ts", name.trim_end_matches(".ts")));
+        counter += 1;
+    }
+    let assembling = out_path.with_extension("assembling");
+    let mut out = match std::fs::File::create(&assembling) {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("hazar: assemble create failed: {error}");
+            return;
+        }
+    };
+    let mut appended = 0u64;
+    for index in 0..bytes.total {
+        let part = stream_dir.join(format!("part-{index:05}.bin"));
+        match std::fs::read(&part) {
+            Ok(chunk) => {
+                use std::io::Write;
+                if out.write_all(&chunk).is_err() {
+                    eprintln!("hazar: assemble write failed");
+                    return;
+                }
+                appended += chunk.len() as u64;
+            }
+            Err(error) => {
+                eprintln!("hazar: missing part {index}: {error}");
+                return;
+            }
+        }
+    }
+    drop(out);
+    if let Err(error) = std::fs::rename(&assembling, &out_path) {
+        eprintln!("hazar: assemble rename failed: {error}");
+        return;
+    }
+    let _ = std::fs::remove_dir_all(&stream_dir);
+
+    let path = out_path.display().to_string();
+    state.update(&bytes.stream_id, |entry| {
+        entry.state = "done".into();
+        entry.written = appended;
+        entry.total = appended;
+        entry.path = Some(path.clone());
+    });
+    state.broadcast(Outbound::Finished {
+        id: bytes.stream_id.clone(),
+        path,
+        size: appended,
+        sha256: None,
+        elapsed_ms: 0,
+    });
+    state.emit_queue(app);
+    state.emit_status(app);
+}
+
+/// Küçük, bağımlılıksız base64 çözücü (segment gövdeleri için).
+fn base64_decode(input: &str) -> Option<Vec<u8>> {
+    let mut lookup = [255u8; 256];
+    for (index, byte) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        .iter()
+        .enumerate()
+    {
+        lookup[*byte as usize] = index as u8;
+    }
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buffer: u32 = 0;
+    let mut bits = 0;
+    for byte in input.bytes() {
+        if byte == b'=' || byte == 10 || byte == 13 {
+            continue;
+        }
+        let value = lookup[byte as usize];
+        if value == 255 {
+            return None;
+        }
+        buffer = (buffer << 6) | value as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    Some(out)
 }
 
 fn resolve_dest(request: &GrabRequest, settings: &Settings) -> PathBuf {
