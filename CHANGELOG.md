@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-09-30
+
+- Master variant URL’lerinin segment sayılması düzeltildi; browser akışı tam VOD playlist çözer.
+- Aynı PHP endpoint’indeki farklı query URL’leri birbirini ezmez.
+- Cross-origin segment fetch’i player’ın cookie/CORS davranışını izler.
+- Playlist/HTML response’ları media chunk olarak kaydedilmez; eski yanlış tamamlanan HLS kayıtları hata olarak gösterilir.
+- Browser fallback aynı queue kaydında ve doğru player frame’inde devam eder.
+
+
 ## 0.2.0 — 2026-09-30
 
 - UI: tek link formu ve download listesi; pause/resume, link yenileme ve update kontrolü.

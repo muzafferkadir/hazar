@@ -1,7 +1,7 @@
 [package]
 # Paket adı CLI binary'siyle (`hazar`) çakışmasın diye `hazar-app`.
 name = "hazar-app"
-version = "0.2.0"
+version = "0.2.1"
 description = "Hazar — multi-connection download manager"
 authors = ["Muzaffer Kadir Yılmaz"]
 edition = "2021"

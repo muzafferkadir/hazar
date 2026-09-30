@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Hazar Integration",
   "description": "Hands downloads to the Hazar download manager: files, HLS and DASH streams.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "Muzaffer Kadir Yılmaz",
   "minimum_chrome_version": "109",
   "action": {

@@ -211,7 +211,7 @@
    */
   function segmentsFromPlaylist(text, baseUrl) {
     const source = String(text || "");
-    if (!source.trimStart().startsWith("#EXTM3U")) return [];
+    if (!source.trimStart().startsWith("#EXTM3U") || /#EXT-X-STREAM-INF:/i.test(source)) return [];
     const out = [];
     for (const raw of source.split(String.fromCharCode(10))) {
       const line = raw.trim();
@@ -280,11 +280,12 @@
       }
     }
     return (segments || []).map((url) => {
-      const match = byPath.get(pathOf(url));
-      if (match) return match;
       try {
         const parsed = new URL(url);
+        // Query can identify a different playlist/resource on the same PHP endpoint.
         if (parsed.search) return url;
+        const match = byPath.get(pathOf(url));
+        if (match) return match;
         const dir = `${parsed.host}|${parsed.pathname.split("/").slice(0, -1).join("/")}`;
         const search = queryByDir.get(dir);
         if (!search) return url;

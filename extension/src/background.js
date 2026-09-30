@@ -439,6 +439,11 @@ function handleAppMessage(message) {
       state.stats.failed += 1;
       updateRecent({ id: message.id, state: "failed", error: message.reason, at: Date.now() });
       setBadge();
+      for (const [key, pending] of chunkAcks) {
+        if (key.startsWith(`${message.id}:`)) {
+          clearTimeout(pending.timer); chunkAcks.delete(key); pending.reject(new Error(message.reason));
+        }
+      }
       // App motoru, oynatıcı oturumuna bağlı segmentte 403 alırsa (Referer/çerez
       // yetmiyor, token o isteğe bağlı) AYNI segmentleri oynatıcı frame'inde indirip
       // byte olarak akıtıyoruz — "Sayfada indir" yolu, çalıştığı kanıtlı.
@@ -496,10 +501,13 @@ async function sendGrab(request, timeout = ACK_TIMEOUT) {
     request.segments.length &&
     typeof request.tab_id === "number"
   ) {
-    const candidate = findCandidate(request.tab_id, request.url) || findCandidateByUrl(request.url);
+    const candidate = findCandidate(request.tab_id, request.url)
+      || [...(state.candidates.get(`${request.tab_id}`) || new Map()).values()]
+        .find(c => c.frameUrl && c.frameUrl === request.frame_url);
     state.grabFallbacks.set(id, {
       tabId: request.tab_id,
       frameId: candidate && typeof candidate.frameId === "number" ? candidate.frameId : undefined,
+      id,
       segments: request.segments.slice(),
       manifest: request.manifest || null,
       filename: request.filename || null,
@@ -781,46 +789,16 @@ async function noteManifest(url, item) {
   debug("manifest probe could not read a body", status, url);
 }
 
-/** HLS/DASH için gerçek segment URL listesi mi (manifest değil)? */
-function isRealSegmentList(list) {
-  return (
-    Array.isArray(list) && list.length > 0 && !list.some((url) => Lib.isManifestUrl(url))
-  );
-}
-
-/**
- * İndirmeye verilecek GERÇEK segment URL'lerini bulur.
- * Sıra: verilen liste → adayın kendi segmentleri → oynatıcının sniff'lediği
- * segmentler → manifest gövdesi / oynatıcı frame'inde çözümleme.
- *
- * Manifest URL'ini app motoruna vermek yanlıştı: app onu oynatıcı oturumu
- * olmadan tekrar çeker, tek kullanımlık token yüzünden 403 alır
- * (kullanıcının "master (1).ts failed · 403" kaydı).
- */
+/** Resolve the complete media playlist before either download path. */
 async function segmentsForStream(tabId, url, frameId, provided) {
-  if (isRealSegmentList(provided)) return provided;
-  const candidate = findCandidate(tabId, url) || findCandidateByUrl(url);
-  if (candidate && isRealSegmentList(candidate.segments)) return candidate.segments;
-  const sniffed = sniffedSegmentsFor(tabId);
-  if (sniffed.length) {
-    debug("segmentsForStream: sniff edilmiş segmentler kullanıldı", sniffed.length);
-    return sniffed;
-  }
+  // Sniffed requests are a playback window, not proof of a complete video.
   const resolved = await resolveSegments(tabId, url, frameId, 3);
-  if (resolved.segments && resolved.segments.length) return resolved.segments;
-  return { error: resolved.error || "segment bulunamadı" };
-}
-
-/** Oynatıcının kendi isteklerinden sniff'lenmiş, manifest olmayan segmentler.
- *  Token/Referer oynatıcının oturumuna ait; manifesti tekrar çekmeye gerek yok. */
-function sniffedSegmentsFor(tabId) {
-  const buckets = state.segments.get(`${tabId}`);
-  if (!buckets) return [];
-  const groups = [...buckets.values()]
-    .map((entry) => [...entry.urls].filter((url) => !Lib.isManifestUrl(url)))
-    .filter((urls) => urls.length > 0);
-  groups.sort((a, b) => b.length - a.length);
-  return groups[0] || [];
+  if (resolved.segments && resolved.segments.length) {
+    resolved.segments.manifest = resolved.manifest;
+    resolved.segments.manifestUrl = resolved.manifestUrl;
+    return resolved.segments;
+  }
+  return { error: resolved.error || "Tam media playlist bulunamadı; eksik video kaydedilmedi" };
 }
 
 /** Oynatıcının kendi manifest yanıtı: düz metinse segmentleri çıkar, değilse işaretle. */
@@ -852,6 +830,11 @@ function handleManifestBody(tabId, url, body, pageUrl, frameId, frameUrl) {
     return;
   }
 
+  candidate.kind = "hls";
+  candidate.isManifest = true;
+  candidate.manifest = body;
+  candidate.encrypted = false;
+  candidate.expired = false;
   const segments = Lib.segmentsFromPlaylist(text, url);
   if (segments.length) {
     candidate.segments = segments;
@@ -897,6 +880,7 @@ function candidatesFor(tabId) {
 
   for (const item of list) {
     item.streams = [];
+    item.isMaster = typeof item.manifest === "string" && item.manifest.includes("#EXT-X-STREAM-INF");
   }
 
   if (buckets) {
@@ -1158,13 +1142,6 @@ async function resolveSegments(tabId, url, frameId, depth) {
   if (!text || !text.trimStart().startsWith("#EXTM3U")) {
     const fetched = await fetchInFrame(tabId, url, frameId);
     if (!fetched || !fetched.ok) {
-      // Manifest tekrar okunamadı (genelde tek kullanımlık token). Ama oynatıcı
-      // segmentleri zaten çekiyorsa onların URL'leri elimizde → indirme onlarla sürer.
-      const sniffed = sniffedSegmentsFor(tabId);
-      if (sniffed.length) {
-        debug("resolveSegments: manifest okunamadı, sniff segmentleri kullanıldı", sniffed.length);
-        return { segments: sniffed };
-      }
       return {
         error: `yakalanmış playlist gövdesi yok; yeniden fetch status ${fetched ? fetched.status : "?"}`,
       };
@@ -1180,15 +1157,19 @@ async function resolveSegments(tabId, url, frameId, depth) {
     return { error: "playlist düz metin değil (client-side şifreli?)" };
   }
   const variant = Lib.bestVariantFromPlaylist(text, url);
-  if (variant && depth > 0) {
+  if (variant) {
+    if (depth <= 0) return { error: "Playlist zinciri çok uzun" };
     return resolveSegments(tabId, variant, frameId, depth - 1);
   }
+  if (!text.includes("#EXT-X-ENDLIST")) return { error: "Tamamlanmış VOD playlist yok; eksik stream kaydedilmedi" };
   const parsed = Lib.segmentsFromPlaylist(text, url);
   // Playlist satırları göreliyse token düşer; oynatıcının gerçekten istediği
   // (sniff edilmiş) segment URL'lerini tercih et.
   const buckets = state.segments.get(`${tabId}`);
   const sniffed = buckets ? [...buckets.values()].flatMap((entry) => [...entry.urls]) : [];
   return {
+    manifest: text,
+    manifestUrl: url,
     segments:
       parsed.length && sniffed.length ? Lib.preferSniffedSegments(parsed, sniffed) : parsed,
   };
@@ -1207,6 +1188,7 @@ async function tunnelSegments({ tabId, frameId, segments, filename, id, manifest
   if (!state.features.includes("bytes_ack")) return { ok: false, error: "Hazar uygulamasını güncelle" };
   const streamId = id || `cap-${Date.now().toString(36)}`;
   const name = filename || "stream.ts";
+  if (!segments.length) return { ok: false, error: "Segment listesi boş" };
   const total = segments.length;
   updateRecent({ id: streamId, state: "capturing", written: 0, total, at: Date.now() });
   for (let index = 0; index < total; index += 1) {
@@ -1220,10 +1202,16 @@ async function tunnelSegments({ tabId, frameId, segments, filename, id, manifest
       updateRecent({ id: streamId, state: "failed", error, at: Date.now() });
       return { ok: false, error, streamId };
     }
+    const prefix = atob(result.base64 || "").slice(0, 512).trimStart();
+    if (/^(#EXTM3U|<\?xml|<MPD[\s>]|<!doctype|<html[\s>])/i.test(prefix)) {
+      const error = `segment ${index + 1}/${total}: video yerine playlist/HTML geldi; kaydedilmedi`;
+      updateRecent({ id: streamId, state: "failed", error, at: Date.now() });
+      return { ok: false, error, streamId };
+    }
     const key = `${streamId}:${index}`;
     const ack = new Promise((resolve, reject) => {
       const timer = setTimeout(() => { chunkAcks.delete(key); reject(new Error("app chunk ACK timeout")); }, 30000);
-      chunkAcks.set(key, { resolve, timer });
+      chunkAcks.set(key, { resolve, reject, timer });
     });
     const sent = send({
       type: "bytes",
@@ -1357,7 +1345,8 @@ function initContentMessages() {
               return;
             }
             request.segments = resolved;
-            request.manifest = null;
+            request.manifest = resolved.manifest || null;
+            request.url = resolved.manifestUrl || request.url;
           }
           respond({ ok: await sendGrab(request), connected: isConnected() });
         })().catch((error) => respond({ ok: false, error: String(error) }));
@@ -1421,7 +1410,7 @@ function initContentMessages() {
             segments,
             filename,
             id: streamId,
-            manifest: (findCandidate(message.tabId, message.url) || {}).manifest || null,
+            manifest: segments.manifest || (findCandidate(message.tabId, message.url) || {}).manifest || null,
           });
           if (!result.ok) {
             // Popup'a bağlamlı hata ver: bağlamsız "status 403" yanlış mesaja

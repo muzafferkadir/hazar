@@ -43,7 +43,12 @@
     if (!message || message.type !== "fetch_bytes") return false;
     (async () => {
       try {
-        const response = await fetch(message.url, { credentials: "include" });
+        let response = await fetch(message.url, { credentials: "same-origin" });
+        // Match normal player requests; wildcard CORS CDNs reject include.
+        // Cookie-gated cross-origin servers can still opt into credentialed retry.
+        if ([401, 403].includes(response.status) && new URL(message.url, location.href).origin !== location.origin) {
+          response = await fetch(message.url, { credentials: "include" });
+        }
         if (!response.ok) {
           respond({ ok: false, status: response.status });
           return;

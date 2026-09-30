@@ -351,12 +351,21 @@ pub async fn download_hls_captured(
     };
 
     let client = default_client_with(opts.user_agent.as_deref(), &opts.headers)?;
-    let plan = match &opts.segments {
+    let mut plan = match &opts.segments {
         Some(urls) if !urls.is_empty() && captured.is_none() => {
             plan_from_segments(urls, opts.base_url.as_deref().unwrap_or(&opts.manifest))?
         }
         _ => resolve_plan(&client, &opts.manifest, captured).await?,
     };
+
+    if captured.is_some() {
+        if let Some(urls) = &opts.segments {
+            if urls.len() != plan.segments.iter().filter(|s| !s.init).count() {
+                return Err(Error::Protocol("captured segment list does not match playlist".into()));
+            }
+            for (segment, url) in plan.segments.iter_mut().filter(|s| !s.init).zip(urls) { segment.url = url.clone(); }
+        }
+    }
 
     let work = WorkDir::new(&opts.output);
     let mut resumed = false;
@@ -700,6 +709,7 @@ async fn fetch_segment(
         data.extend_from_slice(&chunk?);
     }
 
+    validate_media_body(&data)?;
     match &segment.key {
         Some(key) if key.method.eq_ignore_ascii_case("AES-128") => {
             let uri = key
@@ -823,4 +833,14 @@ impl WorkDir {
         tokio::fs::rename(&tmp, output).await?;
         Ok(total)
     }
+}
+
+/// Refuse text manifests/error pages passed off as media chunks.
+pub fn validate_media_body(data: &[u8]) -> Result<()> {
+    let prefix = String::from_utf8_lossy(&data[..data.len().min(512)]);
+    let prefix = prefix.trim_start().to_ascii_lowercase();
+    if data.is_empty() || ["#extm3u", "<?xml", "<mpd", "<!doctype", "<html"].iter().any(|p| prefix.starts_with(p)) {
+        return Err(Error::Protocol("segment response is a playlist/HTML or empty, not media".into()));
+    }
+    Ok(())
 }

@@ -539,6 +539,20 @@ pub fn start(app: AppHandle, settings: Settings) -> Arc<CaptureState> {
             ) {
                 entry.state = "interrupted".into();
             }
+            if entry.kind == "hls" && entry.state == "done" {
+                if let Some(path) = &entry.path {
+                    use std::io::Read;
+                    if let Ok(mut file) = std::fs::File::open(path) {
+                        let mut prefix = [0u8; 512];
+                        if let Ok(n) = file.read(&mut prefix) {
+                            if hazar_engine::hls::validate_media_body(&prefix[..n]).is_err() {
+                                entry.state = "failed".into();
+                                entry.error = Some("Eski capture video yerine playlist kaydetmiş; tarayıcıdan yeniden gönder".into());
+                            }
+                        }
+                    }
+                }
+            }
             queue.upsert(entry);
         }
         requests = saved.requests;
@@ -878,6 +892,12 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
         eprintln!("hazar: bad base64 chunk for {}", bytes.stream_id);
         return;
     };
+    if let Err(error) = hazar_engine::hls::validate_media_body(&data) {
+        state.broadcast(Outbound::Failed { id: bytes.stream_id.clone(), reason: error.to_string() });
+        state.update(&bytes.stream_id, |entry| { entry.state = "failed".into(); entry.error = Some(error.to_string()); });
+        state.emit_queue(app);
+        return;
+    }
     let part = stream_dir.join(format!("part-{:05}.bin", bytes.index));
     let duplicate = part.exists();
     if duplicate && std::fs::read(&part).ok().as_deref() != Some(data.as_slice()) {
@@ -926,7 +946,9 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
         .map(|entry| entry.written)
         .unwrap_or(0)
         + if duplicate { 0 } else { data.len() as u64 };
-    state.update(&bytes.stream_id, |entry| entry.written = written);
+    state.update(&bytes.stream_id, |entry| {
+        entry.written = written; entry.state = "downloading".into(); entry.error = None;
+    });
     state.broadcast(Outbound::Progress {
         id: bytes.stream_id.clone(),
         phase: "browser-capture".to_string(),
@@ -943,7 +965,9 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
         return;
     }
 
-    let mut out_path = Path::new(&dir).join(&name);
+    let mut out_path = state.queue().iter().find(|e| e.id == bytes.stream_id)
+        .and_then(|e| e.path.as_ref()).map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(&dir).join(&name));
     let mut counter = 1;
     while out_path.exists() && counter < 1000 {
         out_path = Path::new(&dir).join(format!("{}-{counter}.ts", name.trim_end_matches(".ts")));

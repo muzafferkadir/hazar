@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/hazar-engine", "crates/hazar-cli", "crates/hazar-localapi", "crates/hazar-testmatrix", "src-tauri"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 authors = ["Muzaffer Kadir Yılmaz"]
