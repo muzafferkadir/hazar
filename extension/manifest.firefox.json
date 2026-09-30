@@ -6,7 +6,13 @@
   "author": "Muzaffer Kadir Yılmaz",
   "action": {
     "default_title": "Hazar",
-    "default_popup": "src/popup.html"
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/16x16.png",
+      "32": "icons/32x32.png",
+      "48": "icons/48x48.png",
+      "128": "icons/128x128.png"
+    }
   },
   "background": {
     "scripts": [
@@ -56,5 +62,11 @@
   "options_ui": {
     "page": "src/options.html",
     "open_in_tab": false
+  },
+  "icons": {
+    "16": "icons/16x16.png",
+    "32": "icons/32x32.png",
+    "48": "icons/48x48.png",
+    "128": "icons/128x128.png"
   }
 }

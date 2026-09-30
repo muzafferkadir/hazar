@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="tr">
   <head>
     <meta charset="UTF-8" />
     <title>Hazar — Ayarlar</title>
@@ -13,7 +13,7 @@
         color: rgba(255, 255, 255, 0.92);
         font: 12px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, sans-serif;
       }
-      h1 { font-size: 14px; margin: 0 0 12px; }
+      h1 { display:flex; align-items:center; gap:8px; font-size: 14px; margin: 0 0 12px; }
       label { display: block; margin-top: 12px; color: rgba(255, 255, 255, 0.7); }
       input[type="text"], input[type="number"], textarea {
         width: 100%;
@@ -42,7 +42,7 @@
     </style>
   </head>
   <body>
-    <h1>Hazar Integration</h1>
+    <h1><img src="../icons/32x32.png" width="24" height="24" alt="" /> Hazar Integration</h1>
 
     <div class="row"><input type="checkbox" id="capture_enabled" /><label for="capture_enabled" style="margin: 0">İndirmeleri yakala</label></div>
     <div class="row"><input type="checkbox" id="capture_manifests" /><label for="capture_manifests" style="margin: 0">HLS/DASH streamlerini de yakala</label></div>

@@ -17,7 +17,7 @@
         "height": 680,
         "minWidth": 560,
         "minHeight": 480,
-        "transparent": false,
+        "transparent": true,
         "titleBarStyle": "Overlay"
       }
     ],
@@ -27,7 +27,8 @@
         "enable": false,
         "scope": []
       }
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

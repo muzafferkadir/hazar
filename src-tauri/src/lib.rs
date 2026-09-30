@@ -55,6 +55,15 @@ pub fn run() {
                 }
             }
 
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_decorum::WebviewWindowExt;
+                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+                if let Some(window) = app.get_webview_window("main") {
+                    apply_vibrancy(&window, NSVisualEffectMaterial::UnderWindowBackground, None, None)?;
+                    window.set_traffic_lights_inset(16.0, 22.0)?;
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

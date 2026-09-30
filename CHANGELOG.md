@@ -10,5 +10,7 @@
 - Captured HLS metadata korunur; alternate audio, checksum doğrulanan FFmpeg ile mux edilir.
 - Browser byte aktarımı disk ACK bekler; duplicate chunk ve değişen capture planı kontrol edilir.
 - Bridge web origin'lerini, eksik session ve başka client'a ait job mesajlarını reddeder.
-- Eski single-download IPC, ayrı progress/log ekranı, büyük kullanılmayan CSS ve macOS blur dependency'leri kaldırıldı.
+- Eski single-download IPC, ayrı progress/log ekranı ve kullanılmayan CSS kaldırıldı.
+- Mor gradient tarzında yeni download logosu ve app icon’ları.
+- Klyppr’ın native macOS transparency ve vibrancy efekti geri eklendi.
 - macOS universal ve Windows release'e FFmpeg/lisans/source referansları eklendi; release kontrolleri genişletildi.

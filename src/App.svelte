@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { invoke } from '@tauri-apps/api/core'
+  import { isTauri, invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
   import { open as chooseFolder } from '@tauri-apps/plugin-dialog'
   import { revealItemInDir } from '@tauri-apps/plugin-opener'
@@ -66,6 +66,7 @@
     catch (error) { message = String(error) } finally { updating = false }
   }
   onMount(() => {
+    if (isTauri() && /Mac/.test(navigator.platform)) document.documentElement.classList.add('native-vibrancy')
     let disposed = false
     const unlisteners: (() => void)[] = []
     void Promise.all([invoke<Settings>('capture_settings_get'), invoke<string>('engine_version')]).then(([s, v]) => { if (!disposed) { settings = s; version = v } }).catch(e => message = String(e))
@@ -80,7 +81,7 @@
 
 <main>
   <header data-tauri-drag-region>
-    <div><h1>Hazar <span>{version}</span></h1><p>İndirmelerin tek yerde.</p></div>
+    <div class="brand"><img src="/logo.png" alt="" width="32" height="32" /><div><h1>Hazar <span>{version}</span></h1><p>İndirmelerin tek yerde.</p></div></div>
     <button class:chosen={showSettings} onclick={() => showSettings = !showSettings}>Ayarlar</button>
   </header>
   <form class="add" onsubmit={(event) => { event.preventDefault(); void add() }}>
