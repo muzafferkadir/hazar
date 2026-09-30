@@ -261,6 +261,19 @@ document.getElementById("group").addEventListener("change", async (event) => {
   await send({ type: "settings", patch: { group_hls: event.target.checked } });
 });
 
+document.getElementById("rescan").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const tab = await activeTab();
+  if (!tab) return;
+  button.disabled = true;
+  // retry_extractor: bu sekmenin yt-dlp sonucunu siler ve yeniden analiz eder.
+  const result = await send({ type: "retry_extractor", tabId: tab.id });
+  if (!result.ok && result.error) button.textContent = result.error;
+  rendered.delete("candidates");
+  await renderCandidates();
+  setTimeout(() => { button.disabled = false; button.textContent = t("rescan"); }, 1500);
+});
+
 document.getElementById("reconnect").addEventListener("click", async () => {
   await send({ type: "reconnect" });
   setTimeout(refresh, 900);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-10-01
+
+- Uygulama adı **Hazar Download Manager**; göl mavisi yeni logo, app + extension için ortak renk token'ları, light/dark mode.
+- Ayarlara dil seçeneği (English varsayılan, Türkçe). Dil app'ten extension'a otomatik geçer; dil dosyaları `src/locales` ve `extension/src/locales`.
+- Video paneli: sağ üstte küçük logo, tıklayınca kalite listesi (2160p…144p), × ile kapanır; ↻ ile manuel yeniden tarama (popup'ta da).
+- yt-dlp tüm kaliteleri listeler, seçilen yükseklik indirilir. Analiz metadata'sı download'da tekrar kullanılır; aynı video URL varyantları için tekrar analiz yapılmaz.
+- yt-dlp adayları hata kırmızısı yerine outline stil; bağlantı yokken doğru hata mesajı.
+
 ## 0.2.5 — 2026-10-01
 
 - yt-dlp probe hataları login/PO token/403/429/runtime/unsupported/DRM/timeout olarak sınıflanır ve popup'ta gösterilir; rate limit cooldown ve manuel tekrar analiz.

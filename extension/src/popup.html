@@ -26,6 +26,9 @@
       .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
       .dot.on { background: var(--success); }
       .dim { color: var(--dim); }
+      .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+      .section-head h2 { margin: 0; }
+      .section-head button { padding: 2px 8px; font-size: 11px; }
       section { padding: 10px 12px; border-bottom: 1px solid var(--line); }
       h2 {
         margin: 0 0 6px;
@@ -98,7 +101,7 @@
     </section>
 
     <section>
-      <h2 data-i18n="pageMedia"></h2>
+      <div class="section-head"><h2 data-i18n="pageMedia"></h2><button id="rescan" data-i18n="rescan"></button></div>
       <div id="candidates"></div>
     </section>
 

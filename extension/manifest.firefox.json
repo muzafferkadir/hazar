@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Hazar Download Manager",
   "description": "Hands downloads to the Hazar download manager: files, HLS and DASH streams.",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "author": "Muzaffer Kadir Yılmaz",
   "action": {
     "default_title": "Hazar Download Manager",
