@@ -1,0 +1,19 @@
+/* Palette follows the lake-blue app icon; keep in sync with src/styles/app.css. */
+:root {
+  color-scheme: light dark;
+  --accent: #0A5A94; --accent-hover: #084A7A; --accent-contrast: #fff; --accent-soft: #2A9FD6;
+  --chip: rgba(10, 90, 148, 0.12); --chip-text: #0A5A94; --link: #0A5A94;
+  --danger: #C62828; --success: #1E8E5A;
+  --bg: #F4F8FB; --card: #fff; --control: #EAF1F6; --control-hover: #DCE8F0;
+  --text: #0B1622; --dim: #5B6B7A; --line: #D5E1EA; --focus: #2A9FD6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #2A9FD6; --accent-hover: #4DB3E3; --accent-contrast: #061F42; --accent-soft: #2A9FD6;
+    --chip: rgba(42, 159, 214, 0.18); --chip-text: #8FDBFF; --link: #7FD0FF;
+    --danger: #FF6B61; --success: #4FD1A5;
+    --bg: #0B1622; --card: #0F1D2B; --control: #16283A; --control-hover: #1D3349;
+    --text: #E6F0F5; --dim: #8FA3B5; --line: #22374B; --focus: #7FD0FF;
+  }
+}
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

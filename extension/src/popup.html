@@ -68,9 +68,9 @@
       button.primary:hover:not(:disabled) { background: var(--accent-hover); }
       .extractor-error { color: var(--danger); padding: 6px 0; }
       .extractor-error button { margin-top: 6px; }
-      .ytdlp .name, .ytdlp .kind { color: var(--danger); }
-      .ytdlp .kind { background: color-mix(in srgb, var(--danger) 14%, transparent); }
-      .ytdlp button.primary, .ytdlp button.primary:hover:not(:disabled) { background: var(--danger-bg); color: #fff; }
+      .ytdlp .kind { background: var(--accent-soft); color: #fff; font-weight: 600; }
+      .ytdlp button.primary { background: transparent; border-color: var(--accent-soft); color: var(--link); }
+      .ytdlp button.primary:hover:not(:disabled) { background: var(--chip); }
       button:disabled { opacity: 0.45; cursor: default; }
       .bar { height: 4px; border-radius: 999px; background: var(--line); overflow: hidden; }
       .bar > i { display: block; height: 100%; background: var(--accent-soft); }

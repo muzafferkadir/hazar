@@ -6,7 +6,7 @@
 set -euo pipefail
 
 REPO="muzafferkadir/hazar"
-APP="Hazar.app"
+APP="Hazar Download Manager.app"
 
 if [ "$(uname)" != "Darwin" ]; then
   echo "This installer is for macOS. On Windows use install.ps1 (see the README)." >&2
@@ -29,7 +29,7 @@ curl -fsSL "$DMG_URL" -o "$TMP/hazar.dmg"
 
 echo "Installing to /Applications…"
 hdiutil attach "$TMP/hazar.dmg" -nobrowse -quiet -mountpoint "$TMP/mnt"
-rm -rf "/Applications/$APP"
+rm -rf "/Applications/$APP" "/Applications/Hazar.app"
 cp -R "$TMP/mnt/$APP" "/Applications/"
 hdiutil detach "$TMP/mnt" -quiet
 

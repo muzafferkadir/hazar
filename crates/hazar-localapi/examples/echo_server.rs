@@ -53,6 +53,7 @@ async fn main() {
                 ),
                 Inbound::Ping(_) => {}
                 Inbound::Hello(_) => {}
+                _ => {}
             },
             Ok(None) => break,
             Err(_) => break,

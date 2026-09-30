@@ -188,7 +188,7 @@
       button:hover{background:#0E6BAE}button:disabled{opacity:.7;cursor:wait}button:focus-visible{outline:2px solid white;outline-offset:2px}
       .menu{margin-top:5px;padding:5px;background:rgba(6,31,66,.94);backdrop-filter:blur(8px);border:1px solid rgba(127,208,255,.25);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.45);max-height:240px;overflow:auto}
       .menu[hidden],.status:empty{display:none}.menu button{display:block;width:100%;text-align:left;background:transparent;border:0;box-shadow:none}
-      .menu button.ytdlp{color:#ff6961}.download.ytdlp{background:#B3261E;border-color:#ff6961}.menu button:hover{background:rgba(127,208,255,.14)}.status{margin-top:5px;padding:7px;border-radius:6px;background:rgba(6,31,66,.94);overflow-wrap:anywhere;font-size:12px;line-height:1.4}
+      .menu button.ytdlp{color:#8FDBFF}.download.ytdlp{background:#061F42;border-color:#7FD0FF;color:#8FDBFF}.download.ytdlp:hover{background:#0A2F5C}.menu button:hover{background:rgba(127,208,255,.14)}.status{margin-top:5px;padding:7px;border-radius:6px;background:rgba(6,31,66,.94);overflow-wrap:anywhere;font-size:12px;line-height:1.4}
     </style><div class="panel"><button class="download" type="button" aria-expanded="false">↓ Hazar ile indir</button><div class="menu" hidden></div><div class="status" role="status"></div></div>`;
     const panel = { video, host, button: root.querySelector(".download"),
       menu: root.querySelector(".menu"), status: root.querySelector(".status"), candidates: [], busy: false };
