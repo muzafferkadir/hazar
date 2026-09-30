@@ -967,6 +967,31 @@ async function fetchInFrame(tabId, url, frameId) {
   }
 }
 
+/**
+ * Playlist'i (gerekiyorsa master → varyant zincirini) çözer ve segment listesini verir.
+ * Segment istekleri oynatıcının frame'inden yapıldığı için token/çerez/Referer tutar.
+ */
+async function resolveSegments(tabId, url, frameId, depth) {
+  const fetched = await fetchInFrame(tabId, url, frameId);
+  if (!fetched || !fetched.ok) {
+    return { error: `playlist alınamadı (status ${fetched ? fetched.status : "?"})` };
+  }
+  let text;
+  try {
+    text = atob(fetched.base64 || "");
+  } catch (error) {
+    return { error: "playlist gövdesi okunamadı" };
+  }
+  if (!text.trimStart().startsWith("#EXTM3U")) {
+    return { error: "playlist düz metin değil (client-side şifreli?)" };
+  }
+  const variant = Lib.bestVariantFromPlaylist(text, url);
+  if (variant && depth > 0) {
+    return resolveSegments(tabId, variant, frameId, depth - 1);
+  }
+  return { segments: Lib.segmentsFromPlaylist(text, url) };
+}
+
 function initContextMenus() {
   if (!chrome.contextMenus) return;
   chrome.runtime.onInstalled.addListener(() => {
@@ -1082,16 +1107,33 @@ function initContentMessages() {
       case "save_stream": {
         // Segmentleri oynatıcının kendi frame'inde indir, baytları app'e aktar.
         const streamId = `cap-${Date.now().toString(36)}`;
-        const segments = message.segments || [];
         const filename = message.filename || "stream.ts";
         const frameId = typeof message.frameId === "number" ? message.frameId : undefined;
-        updateRecent({ id: streamId, state: "capturing", written: 0, total: segments.length, at: Date.now() });
+        updateRecent({ id: streamId, state: "resolving", written: 0, total: 0, at: Date.now() });
         (async () => {
+          // Master → varyant → segment zincirini çöz (oynatıcı oturumunda).
+          const resolved = await resolveSegments(message.tabId, message.url, frameId, 3);
+          if (!resolved.segments || resolved.segments.length === 0) {
+            const reason = resolved.error || "segment bulunamadı";
+            updateRecent({ id: streamId, state: "failed", error: reason, at: Date.now() });
+            respond({ ok: false, error: reason });
+            return;
+          }
+          const segments = resolved.segments;
+          updateRecent({ id: streamId, state: "capturing", written: 0, total: segments.length, at: Date.now() });
           for (let index = 0; index < segments.length; index += 1) {
             const result = await fetchInFrame(message.tabId, segments[index], frameId);
             if (!result || !result.ok) {
-              const reason = result && result.status ? `status ${result.status}` : (result && result.error) || "bilinmeyen hata";
-              updateRecent({ id: streamId, state: "failed", error: `segment ${index + 1}: ${reason}`, at: Date.now() });
+              const reason =
+                result && result.status
+                  ? `status ${result.status}`
+                  : (result && result.error) || "bilinmeyen hata";
+              updateRecent({
+                id: streamId,
+                state: "failed",
+                error: `segment ${index + 1}/${segments.length}: ${reason}`,
+                at: Date.now(),
+              });
               respond({ ok: false, error: reason });
               return;
             }
@@ -1110,7 +1152,13 @@ function initContentMessages() {
               respond({ ok: false, error: "app bağlı değil" });
               return;
             }
-            updateRecent({ id: streamId, state: "capturing", written: index + 1, total: segments.length, at: Date.now() });
+            updateRecent({
+              id: streamId,
+              state: "capturing",
+              written: index + 1,
+              total: segments.length,
+              at: Date.now(),
+            });
           }
           respond({ ok: true, segments: segments.length });
         })();

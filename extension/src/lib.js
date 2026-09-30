@@ -225,6 +225,69 @@
     return out;
   }
 
+  /**
+   * Master playlist ise en yüksek BANDWIDTH'li varyantın URL'ini döndürür.
+   * (Gerçek bölümlerde içerik önce varyant playlist'te listelenir.)
+   */
+  function bestVariantFromPlaylist(text, baseUrl) {
+    const source = String(text || "");
+    if (!source.includes("#EXT-X-STREAM-INF")) return null;
+    let best = null;
+    let pending = null;
+    for (const raw of source.split(String.fromCharCode(10))) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.startsWith("#EXT-X-STREAM-INF:")) {
+        const match = /BANDWIDTH=(\d+)/i.exec(line);
+        pending = { bandwidth: match ? Number(match[1]) : 0, uri: null };
+        continue;
+      }
+      if (pending && !line.startsWith("#")) {
+        pending.uri = line;
+        if (!best || pending.bandwidth > best.bandwidth) best = pending;
+        pending = null;
+      }
+    }
+    if (!best || !best.uri) return null;
+    try {
+      return new URL(best.uri, baseUrl).toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Master playlist ise en yüksek BANDWIDTH'li varyantın URL'ini döndürür.
+   * Gerçek bölümlerde içerik önce varyant playlist'te listelenir; bu yüzden
+   * master → varyant → segment zincirini çözmek gerekir.
+   */
+  function bestVariantFromPlaylist(text, baseUrl) {
+    const source = String(text || "");
+    if (!source.includes("#EXT-X-STREAM-INF")) return null;
+    let best = null;
+    let pending = null;
+    for (const raw of source.split(String.fromCharCode(10))) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.startsWith("#EXT-X-STREAM-INF:")) {
+        const match = /BANDWIDTH=(\d+)/i.exec(line);
+        pending = { bandwidth: match ? Number(match[1]) : 0, uri: null };
+        continue;
+      }
+      if (pending && !line.startsWith("#")) {
+        pending.uri = line;
+        if (!best || pending.bandwidth > best.bandwidth) best = pending;
+        pending = null;
+      }
+    }
+    if (!best || !best.uri) return null;
+    try {
+      return new URL(best.uri, baseUrl).toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
   /** Trailing number of a segment URL; used for ordering. */
   function segmentIndex(url) {
     const path = pathOf(url);
@@ -290,6 +353,8 @@
     cookieHeader,
     groupSegments,
     segmentsFromPlaylist,
+    bestVariantFromPlaylist,
+    bestVariantFromPlaylist,
     segmentIndex,
     bestStream,
     forwardableHeaders,

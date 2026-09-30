@@ -248,6 +248,12 @@ document.getElementById("reconnect").addEventListener("click", async () => {
   setTimeout(refresh, 900);
 });
 
+document.getElementById("clear-recent").addEventListener("click", async () => {
+  await chrome.storage.local.set({ recent: [] });
+  rendered.delete("recent");
+  await renderRecent();
+});
+
 document.getElementById("options").addEventListener("click", (event) => {
   event.preventDefault();
   chrome.runtime.openOptionsPage();

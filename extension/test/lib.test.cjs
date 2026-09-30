@@ -142,4 +142,20 @@ test("segmentsFromPlaylist resolves absolute and relative URLs", () => {
   assert.deepEqual(lib.segmentsFromPlaylist("<html>nope</html>", "https://x/"), []);
 });
 
+test("bestVariantFromPlaylist picks the highest bandwidth", () => {
+  const master = [
+    "#EXTM3U",
+    "#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360",
+    "low/index.m3u8",
+    "#EXT-X-STREAM-INF:BANDWIDTH=4200000,RESOLUTION=1920x1080",
+    "high/index.m3u8",
+    "",
+  ].join(String.fromCharCode(10));
+  assert.equal(
+    lib.bestVariantFromPlaylist(master, "https://cdn.example/vod/master.m3u8"),
+    "https://cdn.example/vod/high/index.m3u8",
+  );
+  assert.equal(lib.bestVariantFromPlaylist("#EXTM3U\n#EXTINF:6,\nseg.ts", "https://x/"), null);
+});
+
 console.log(`\n${passed} test(s) passed`);
