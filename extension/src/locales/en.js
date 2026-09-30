@@ -34,6 +34,7 @@
   panelDownload: "Download with Hazar",
   panelSending: "Sending…",
   panelSent: "Sent to Hazar",
+  rescan: "Scan again",
   panelClose: "Close",
   openApp: "Open the Hazar app",
   reloadExtension: "Reload the Hazar extension",

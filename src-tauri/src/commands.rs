@@ -149,6 +149,7 @@ pub fn queue_add(
         .filter(|value| *value > 0.0)
         .map(|value| (value * 1024.0 * 1024.0) as u64);
     let request = hazar_localapi::GrabRequest {
+        max_height: None,
         url: url.clone(),
         extractor: None,
         browser_cookies: Vec::new(),

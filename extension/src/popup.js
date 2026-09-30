@@ -168,6 +168,7 @@ async function renderCandidates() {
         url: candidate.url,
         kind: candidate.kind,
         extractor: candidate.extractor,
+        height: candidate.height,
         filename: candidate.filename,
         pageUrl: candidate.pageUrl,
         pageTitle: tab.title,

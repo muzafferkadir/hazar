@@ -408,10 +408,11 @@ async function extractorCandidates(tabId, pageUrl) {
       }
     });
     const title = reply?.title;
-    const height = Number(reply?.height) || null;
-    const items = title ? [{ url: pageUrl, kind: "file", extractor: "ytdlp", height,
+    // Her kalite ayrı aday: kullanıcı 1080p/720p… seçer, app o yüksekliği indirir.
+    const heights = Array.isArray(reply?.heights) && reply.heights.length ? reply.heights : [Number(reply?.height) || null];
+    const items = title ? heights.map(height => ({ url: pageUrl, kind: "file", extractor: "ytdlp", height,
       label: height ? `yt-dlp · ${height}p · ${title}` : `yt-dlp · ${title}`,
-      filename: Lib.sanitizeFilename(`${title}.mp4`), pageUrl }] : [];
+      filename: Lib.sanitizeFilename(height ? `${title} (${height}p).mp4` : `${title}.mp4`), pageUrl })) : [];
     const entry = extractionCache.get(key); if (entry) { entry.items = items; entry.error = reply?.error || null; entry.settled = true; }
     if (reply?.error?.retry_after) {
       if (extractorCooldowns.size > 60) extractorCooldowns.delete(extractorCooldowns.keys().next().value);
@@ -1560,6 +1561,7 @@ async function submitGrab(message, tabId, pageUrl, frameId, frameUrl) {
   });
   if (message.extractor === "ytdlp" || youtube) {
     request.extractor = "ytdlp";
+    if (Number(message.height) > 0) request.max_height = Number(message.height);
     request.kind = "file";
     await attachExtractorContext(request, tabId);
   }
@@ -1703,6 +1705,14 @@ function initContentMessages() {
           respond({ ok: true, candidates: [...candidatesFor(id).filter(c => !Lib.youtubeVideoUrl(c.url)), ...extra],
             extractor: extractionCache.get(extractionKey(id, page.url)) ? { pending: !extractionCache.get(extractionKey(id, page.url)).settled, error: extractionCache.get(extractionKey(id, page.url)).error || null } : null });
         }).catch(() => respond({ ok: true, candidates: candidatesFor(id) }));
+        return true;
+      }
+      case "rescan": {
+        // Paneldeki ↻: bu sayfanın yt-dlp sonucunu at, yeniden analiz et.
+        const url = message.pageUrl || frameUrl;
+        extractionCache.delete(extractionKey(tabId, url));
+        void extractorCandidates(tabId, url);
+        respond({ ok: true });
         return true;
       }
       case "retry_extractor": {

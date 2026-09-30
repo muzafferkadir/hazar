@@ -128,6 +128,9 @@ pub struct GrabRequest {
     pub url: String,
     #[serde(default)]
     pub extractor: Option<String>,
+    /// yt-dlp: kullanıcının seçtiği video yüksekliği (ör. 720). Yoksa en iyisi.
+    #[serde(default)]
+    pub max_height: Option<u32>,
     #[serde(default, skip_serializing)]
     pub browser_cookies: Vec<hazar_engine::ytdlp::BrowserCookie>,
     #[serde(default, skip_serializing)]
@@ -206,7 +209,7 @@ pub enum Outbound {
         settings: Settings,
     },
     RefreshContext { id: String, url: String, page_url: Option<String>, tab_id: i64 },
-    Extracted { id: String, title: Option<String>, #[serde(skip_serializing_if = "Option::is_none")] height: Option<u32>, error: Option<hazar_engine::ytdlp::Diagnostic>, },
+    Extracted { id: String, title: Option<String>, #[serde(skip_serializing_if = "Option::is_none")] height: Option<u32>, #[serde(skip_serializing_if = "Vec::is_empty")] heights: Vec<u32>, error: Option<hazar_engine::ytdlp::Diagnostic>, },
     HelloErr {
         reason: String,
     },

@@ -34,6 +34,7 @@
   panelDownload: "Hazar ile indir",
   panelSending: "Gönderiliyor…",
   panelSent: "Hazar'a gönderildi",
+  rescan: "Tekrar tara",
   panelClose: "Kapat",
   openApp: "Hazar uygulamasını aç",
   reloadExtension: "Hazar extension'ı yenile",

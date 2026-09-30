@@ -18,7 +18,7 @@
   let querying = false;
   const t = globalThis.HazarI18n?.t || (key => key);
   globalThis.HazarI18n?.onChange(() => {
-    for (const panel of panels.values()) { panel.fingerprint = null; panel.button.title = t("panelDownload"); panel.close.title = t("panelClose"); }
+    for (const panel of panels.values()) { panel.fingerprint = null; panel.button.title = t("panelDownload"); panel.close.title = t("panelClose"); panel.rescan.title = t("rescan"); }
     void refreshPanels();
   });
 
@@ -192,12 +192,12 @@
       .panel{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#fff;pointer-events:auto;display:flex;flex-direction:column;align-items:flex-end}
       button{font:inherit;cursor:pointer;color:inherit;border:0;background:transparent;padding:0;line-height:1.3}
       button:disabled{cursor:wait}button:focus-visible{outline:2px solid #7FD0FF;outline-offset:2px}
-      .logo{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;opacity:.8;box-shadow:0 2px 10px rgba(0,0,0,.45);transition:opacity .15s,transform .15s}
-      .logo:hover,.panel.open .logo{opacity:1;transform:scale(1.06)}.logo img{width:30px;height:30px;display:block}
+      .logo{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;opacity:.45;box-shadow:0 1px 6px rgba(0,0,0,.35);transition:opacity .15s,transform .15s}
+      .logo:hover,.panel.open .logo{opacity:1;transform:scale(1.06)}.logo img{width:24px;height:24px;display:block}
       .card{margin-top:6px;min-width:220px;max-width:300px;background:rgba(6,31,66,.95);backdrop-filter:blur(10px);border:1px solid rgba(127,208,255,.25);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.5);overflow:hidden}
       .card[hidden]{display:none}
       .head{display:flex;align-items:center;justify-content:space-between;padding:7px 8px 7px 11px;font-weight:600;border-bottom:1px solid rgba(127,208,255,.15)}
-      .close{width:22px;height:22px;border-radius:6px;font-size:15px;line-height:1;opacity:.8}.close:hover{background:rgba(255,255,255,.12);opacity:1}
+      .head-actions{display:flex;gap:2px}.rescan,.close{width:22px;height:22px;border-radius:6px;font-size:15px;line-height:1;opacity:.8}.rescan:hover,.close:hover{background:rgba(255,255,255,.12);opacity:1}
       .menu{padding:4px;max-height:260px;overflow:auto}
       .menu button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:7px 8px;border-radius:7px}
       .menu button:hover{background:rgba(127,208,255,.14)}
@@ -205,7 +205,7 @@
       .ytdlp .q{background:transparent;border:1px solid #7FD0FF;color:#8FDBFF}
       .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .status{padding:7px 11px;border-top:1px solid rgba(127,208,255,.15);font-size:12px;line-height:1.4;overflow-wrap:anywhere}.status:empty{display:none}
-    </style><div class="panel"><button class="logo" type="button" aria-expanded="false"><img alt="Hazar"></button><div class="card" hidden><div class="head"><span>Hazar</span><button class="close" type="button">×</button></div><div class="menu"></div><div class="status" role="status"></div></div></div>`;
+    </style><div class="panel"><button class="logo" type="button" aria-expanded="false"><img alt="Hazar"></button><div class="card" hidden><div class="head"><span>Hazar</span><span class="head-actions"><button class="rescan" type="button">↻</button><button class="close" type="button">×</button></span></div><div class="menu"></div><div class="status" role="status"></div></div></div>`;
     const panel = { video, host, button: root.querySelector(".logo"), card: root.querySelector(".card"),
       root: root.querySelector(".panel"), close: root.querySelector(".close"),
       menu: root.querySelector(".menu"), status: root.querySelector(".status"), candidates: [], busy: false };
@@ -216,6 +216,14 @@
     panel.setOpen = setOpen;
     // Liste sadece × ile kapanır; video tıklamaları paneli kapatmaz.
     panel.close.addEventListener("click", () => setOpen(false));
+    panel.rescan = root.querySelector(".rescan");
+    panel.rescan.title = panel.rescan.ariaLabel = t("rescan");
+    panel.rescan.addEventListener("click", async () => {
+      panel.status.textContent = t("analyzing");
+      await rpc({ type: "rescan", pageUrl: location.href });
+      panel.fingerprint = null; await refreshPanels();
+      setTimeout(() => { panel.fingerprint = null; void refreshPanels().then(() => { if (panel.status.textContent === t("analyzing")) panel.status.textContent = ""; }); }, 1500);
+    });
     root.addEventListener("pointerdown", event => event.stopPropagation());
     root.addEventListener("click", event => event.stopPropagation());
     panel.button.addEventListener("click", () => setOpen(panel.card.hidden));
@@ -231,7 +239,7 @@
     panel.menu.querySelectorAll("button").forEach(b => { b.disabled = true; });
     panel.status.textContent = t("panelSending");
     const result = await rpc({ type: "grab", url: candidate.url, kind: candidate.kind,
-      extractor: candidate.extractor, filename: candidate.filename, pageTitle: document.title });
+      extractor: candidate.extractor, height: candidate.height, filename: candidate.filename, pageTitle: document.title });
     panel.busy = false;
     panel.menu.querySelectorAll("button").forEach(b => { b.disabled = false; });
     panel.status.textContent = result.ok ? t("panelSent") : (result.error || t("openApp"));

@@ -183,7 +183,7 @@ fn guest_context(context: &BrowserContext) -> BrowserContext {
 
 /// Analiz sonucu: başlık + indirilecek en yüksek video yüksekliği (ör. 1080).
 #[derive(Debug, Clone)]
-pub struct Probe { pub title: String, pub height: Option<u32> }
+pub struct Probe { pub title: String, pub height: Option<u32>, pub heights: Vec<u32> }
 
 /// Analizin metadata'sı download'da tekrar kullanılır; yt-dlp aynı videoyu iki kez analiz etmez.
 const INFO_TTL: Duration = Duration::from_secs(10 * 60);
@@ -210,22 +210,46 @@ pub async fn probe(raw: &str, context: &BrowserContext) -> Result<Option<Probe>>
     result
 }
 
-pub async fn download(url: &str, output: &Path, cancel: Arc<AtomicBool>, expected_sha256: Option<&str>, speed_limit: Option<u64>, context: &BrowserContext, progress: ProgressSender) -> Result<(u64, Option<String>)> {
+pub async fn download(url: &str, height: Option<u32>, output: &Path, cancel: Arc<AtomicBool>, expected_sha256: Option<&str>, speed_limit: Option<u64>, context: &BrowserContext, progress: ProgressSender) -> Result<(u64, Option<String>)> {
     if cancel.load(Ordering::Relaxed) { return Err(Error::Cancelled); }
     if let Some(info) = fresh_info(url) {
-        match download_once(url, Some(&info), output, cancel.clone(), expected_sha256, speed_limit, context, progress.clone()).await {
+        match download_once(url, height, Some(&info), output, cancel.clone(), expected_sha256, speed_limit, context, progress.clone()).await {
             Err(Error::Cancelled) => return Err(Error::Cancelled),
             Err(_) => { let _ = std::fs::remove_file(&info); }
             ok => return ok,
         }
     }
-    if canonical_url(url).is_none() { return download_once(url, None, output, cancel, expected_sha256, speed_limit, context, progress).await; }
+    if canonical_url(url).is_none() { return download_once(url, height, None, output, cancel, expected_sha256, speed_limit, context, progress).await; }
     let guest = guest_context(context);
-    let result = download_once(url, None, output, cancel.clone(), expected_sha256, speed_limit, &guest, progress.clone()).await;
+    let result = download_once(url, height, None, output, cancel.clone(), expected_sha256, speed_limit, &guest, progress.clone()).await;
     if result.as_ref().err().is_some_and(|error| diagnostic(&error.to_string()).code == "login") && guest.cookies.len() < context.cookies.len() && !cancel.load(Ordering::Relaxed) {
-        return download_once(url, None, output, cancel, expected_sha256, speed_limit, context, progress).await;
+        return download_once(url, height, None, output, cancel, expected_sha256, speed_limit, context, progress).await;
     }
     result
+}
+
+/// Seçilen yükseklik önce birebir aranır (1440/2160 için vp9 dahil), yoksa en yakın alt kalite.
+fn format_selector(height: Option<u32>) -> String {
+    const DEFAULT: &str = "bv*[ext=mp4][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc1]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b";
+    match height {
+        None => DEFAULT.into(),
+        Some(h) => {
+            let c = format!("[height<={h}]");
+            format!("bv*[height={h}][ext=mp4]+ba[ext=m4a]/bv*[height={h}]+ba/b[height={h}]/\
+                bv*{c}[ext=mp4][vcodec^=avc1]+ba[ext=m4a]/b{c}[ext=mp4][vcodec^=avc1]/bv*{c}[ext=mp4]+ba[ext=m4a]/b{c}[ext=mp4]/bv*{c}+ba/b{c}")
+        }
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    #[test]
+    fn selector_caps_every_fallback() {
+        assert!(!super::format_selector(None).contains("height"));
+        let s = super::format_selector(Some(720));
+        assert!(s.starts_with("bv*[height=720][ext=mp4]"));
+        for alt in s.split('/') { assert!(alt.contains("height=720") || alt.contains("height<=720"), "{alt}"); }
+    }
 }
 
 async fn probe_once(raw: &str, context: &BrowserContext) -> Result<Option<Probe>> {
@@ -270,22 +294,28 @@ async fn probe_once(raw: &str, context: &BrowserContext) -> Result<Option<Probe>
         .filter(|f| f["vcodec"].as_str().is_some_and(|v| v != "none" && (!avc || v.starts_with("avc1"))))
         .filter_map(|f| f["height"].as_u64()).max();
     let height = heights(true).or_else(|| heights(false)).or_else(|| info["height"].as_u64()).map(|h| h as u32);
-    Ok(Some(Probe { title: info["title"].as_str().unwrap_or("Video").chars().take(200).collect(), height }))
+    let mut all: Vec<u32> = info["formats"].as_array().into_iter().flatten()
+        .filter(|f| f["vcodec"].as_str().is_some_and(|v| v != "none"))
+        .filter_map(|f| f["height"].as_u64()).filter(|h| *h >= 144).map(|h| h as u32).collect();
+    all.sort_unstable_by(|a, b| b.cmp(a)); all.dedup();
+    Ok(Some(Probe { title: info["title"].as_str().unwrap_or("Video").chars().take(200).collect(), height, heights: all }))
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn download_once(url: &str, info: Option<&Path>, output: &Path, cancel: Arc<AtomicBool>, expected_sha256: Option<&str>, speed_limit: Option<u64>, context: &BrowserContext, progress: ProgressSender) -> Result<(u64, Option<String>)> {
+async fn download_once(url: &str, height: Option<u32>, info: Option<&Path>, output: &Path, cancel: Arc<AtomicBool>, expected_sha256: Option<&str>, speed_limit: Option<u64>, context: &BrowserContext, progress: ProgressSender) -> Result<(u64, Option<String>)> {
     let parsed = url::Url::parse(url).map_err(|_| Error::Unsupported("Video linki geçersiz".into()))?;
     if !matches!(parsed.scheme(), "http" | "https") { return Err(Error::Unsupported("HTTP/HTTPS gerekli".into())); }
     let ffmpeg = std::env::var_os("HAZAR_FFMPEG").map(PathBuf::from).unwrap_or_else(|| "ffmpeg".into());
     use sha2::{Digest, Sha256};
     let key = format!("{:x}", Sha256::digest(url.as_bytes()));
-    let work = output.with_extension(format!("ytdlp-{}-parts", &key[..16]));
+    let work = output.with_extension(format!("ytdlp-{}{}-parts", &key[..16], height.map(|h| format!("-{h}p")).unwrap_or_default()));
     tokio::fs::create_dir_all(&work).await?;
     let (mut command, _jar) = command(url, context)?;
     command.args(["--no-simulate", "--newline", "--progress",
-        "--progress-template", r#"download:HAZAR:{"downloaded_bytes":%(progress.downloaded_bytes|0)s,"total_bytes":%(progress.total_bytes,progress.total_bytes_estimate|0)s,"filename":%(progress.filename|unknown)j}"#, "--format", "bv*[ext=mp4][vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc1]/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
-        "--merge-output-format", "mp4", "--remux-video", "mp4", "--socket-timeout", "20", "--retries", "5",
+        "--progress-template", r#"download:HAZAR:{"downloaded_bytes":%(progress.downloaded_bytes|0)s,"total_bytes":%(progress.total_bytes,progress.total_bytes_estimate|0)s,"filename":%(progress.filename|unknown)j}"#, "--format",
+        ])
+        .arg(format_selector(height))
+        .args(["--merge-output-format", "mp4", "--remux-video", "mp4", "--socket-timeout", "20", "--retries", "5",
         "--fragment-retries", "5", "--concurrent-fragments", "4", "--ffmpeg-location"])
         .arg(&ffmpeg)
         .arg("--output").arg(format!("{}.%(ext)s", work.join("video").display().to_string().replace('%', "%%")))

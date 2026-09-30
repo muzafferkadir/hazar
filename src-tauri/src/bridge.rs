@@ -337,11 +337,12 @@ impl CaptureState {
                         Ok(result) => result,
                         Err(_) => Err(hazar_engine::Error::Protocol("yt-dlp analiz timeout".into())),
                     };
-                    let (title, height, error) = match result {
-                        Ok(probe) => (probe.as_ref().map(|p| p.title.clone()), probe.and_then(|p| p.height), None),
-                        Err(error) => (None, None, Some(hazar_engine::ytdlp::diagnostic(&error.to_string()))),
+                    let (title, height, heights, error) = match result {
+                        Ok(Some(probe)) => (Some(probe.title), probe.height, probe.heights, None),
+                        Ok(None) => (None, None, Vec::new(), None),
+                        Err(error) => (None, None, Vec::new(), Some(hazar_engine::ytdlp::diagnostic(&error.to_string()))),
                     };
-                    state.broadcast(Outbound::Extracted { id: grab.id, title, height, error });
+                    state.broadcast(Outbound::Extracted { id: grab.id, title, height, heights, error });
                 });
             }
             Inbound::Context(reply) => {
@@ -795,7 +796,7 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
                 }
             } else { Ok(extractor_context(&request)) };
             match context {
-                Ok(context) => hazar_engine::ytdlp::download(&request.url, &dest, cancel.clone(), request.expected_sha256.as_deref(), request.speed_limit_bps, &context, tx).await
+                Ok(context) => hazar_engine::ytdlp::download(&request.url, request.max_height, &dest, cancel.clone(), request.expected_sha256.as_deref(), request.speed_limit_bps, &context, tx).await
                 .map(|(size, digest)| (dest.clone(), size, digest, started.elapsed().as_millis() as u64))
                 .map_err(|error| { if matches!(error, hazar_engine::Error::Cancelled) { error.to_string() } else { let issue = hazar_engine::ytdlp::diagnostic(&error.to_string()); format!("[{}] {}", issue.code, issue.message) } }),
                 Err(reason) => Err(reason),
