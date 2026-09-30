@@ -44,6 +44,33 @@ Eklenti tarayıcı tarayıcı elle güncellenir: yeni zip'i indir, aynı klasör
 (üzerine yaz), sonra `chrome://extensions` → eklenti kartında **Yenile**.
 Uygulama (Hazar.app) kendi kendini günceller (updater `latest.json` okur).
 
+## yt-dlp session ve network (0.2.5)
+
+- Cookie jar, Referer/User-Agent ve özel captured header'lar ile fresh context. Header'lar origin ile sınırlıdır; cross-origin redirect'te auth taşınmaz. YouTube header/auth üretimi yt-dlp'ye bırakılır.
+- Chrome fixed proxy ayarı okunur; PAC/auto-detect manuel URL ister. Network ayarları extension options içindeki kapalı details bölümündedir. Proxy/source IP eşlemesi gerçek çıkış IP'sinin eşit olduğunun kanıtı değildir. Farklı host/protokol bypass kuralları olan proxy için açık URL tercih edilmelidir. Browser proxy credential challenge aktarılmaz.
+- Site bazlı Chrome impersonation ve browser'da gözlenen Cloudflare 403 için impersonation seçimi. User-Agent tek başına TLS fingerprint değildir.
+- bgutil 2.0.0 script provider, bundled Deno ve platform canvas addon'ları. Yalnız paketli plugin path açık; HTTP provider çıkarıldı. Token client/session/video ID bağlama upstream provider API'sine bırakılır. Cache per-job geçici dizinde tutulur. Token üretimi/site başarısı ayrıca canlı doğrulanmalıdır.
+- YouTube guest önce denenir; login gerektiğinde mevcut account cookie ile en fazla bir retry. Rate limit otomatik tekrar döngüsü doğurmaz.
+- Probe hataları popup'ta görünür; manuel tekrar analiz, 429 için cooldown. Cookie/proxy ayarı değişimi ve sayfa yenileme ilgili probe cache'ini yeniler.
+
+## yt-dlp alternatifi
+
+0.2.4+ app `ytdlp` capability’si verir. Popup açılınca veya görünür video bulunduğunda sayfanın metadata'sı app içindeki yt-dlp ile analiz edilir. İndirilebilir video bulunursa normal Hazar adaylarına ek olarak kırmızı `yt-dlp` adayı gösterilir. Tıklanan seçenek hangi engine'in kullanılacağını belirler; otomatik fallback yoktur. yt-dlp için MP4 video output seçilir; audio mevcutsa mux edilir. YouTube için video ve audio birlikte zorunludur.
+
+Extension cookie API üzerinden ilgili sayfa ve gözlenmiş player frame domain'lerinin cookie'lerini alır. Domain/path/secure/expiry/HttpOnly metadata korunur; app özel geçici cookie jar ve Referer/User-Agent ile probe/download process'ine aktarır. Cookie jar normal tamamlanma, hata ve cancellation sonunda silinir. Cookie değerleri queue JSON'una yazılmaz; browser DB okunmaz. Download başlangıcında fresh context istenir. Tab kapanmış/değişmiş veya app restart sonrası session ownership kaybolmuşsa extension’dan yeniden gönderilmelidir. Chrome 132+ frame partition API varsa seçilmiş frame partition’ı job’a özel jar’a aktarılır; eski browser/Firefox aynı API’yi sağlamayabilir. Yeni domain'e yönlenen extractor'ın ek oturuma ihtiyacı olabilir; DRM, live ve playlist kapsam dışıdır.
+
+Probe sonucu kısa süre cache'lenir. Site değişiklikleri/login/PO token/anti-bot koşulları yüzünden yt-dlp adayının download'u yine hata verebilir.
+
+## Video paneli ve toplu linkler
+
+Video tespit edilince player'ın sağ üstünde **Hazar ile indir** çıkar. Birden fazla kalite varsa buton kalite menüsünü açar. HLS master'ın AUDIO grubu seçilen kaliteye göre çözülür; ayrı audio/video segmentleri browser oturumundan app'e aktarılır ve FFmpeg ile mux edilir. App'in `hls_audio_bytes` capability'si gerekir (0.2.2+).
+
+Panel her iframe'in kendi content script'inde çalışır. Source eşleşmeyen birden fazla player varsa yalnız tek aktif player'a network adayları bağlanır. Scroll, resize, DOM source değişimi ve fullscreen izlenir. Native video-element fullscreen overlay göstermez; player container fullscreen desteklenir. DOM `<track>` subtitle/caption linkleri menüye eklenir; HLS subtitle rendition indirme henüz yoktur.
+
+Sağ tık menüsünden sayfadaki veya seçili download linkleri gönderilebilir. Yalnız `download` attribute'lu veya bilinen dosya uzantılı HTTP/HTTPS linkler alınır; en fazla 200 link, tekilleştirilerek mevcut queue'ya gönderilir. HTML sayfaları toplu download'a alınmaz.
+
+Browser download devralınırken önce pause yapılır. App ACK verirse browser kaydı cancel/erase edilir; ACK yoksa browser download resume edilir.
+
 ## Yakalanan stream inmediyse
 
 Bazı oynatıcılar manifest'i **tek kullanımlık token** ile ve/veya **tarayıcıda şifreli**
@@ -137,5 +164,5 @@ pnpm check:extension                   # node --check ile syntax
 - DASH `type="dynamic"` (canlı) manifestler reddedilir.
 - Client-side şifreli playlist'ler (ör. `master.m3u8?v=<token>` yanıtı `text/html`)
   net hata ile reddedilir: `manifest is not an HLS playlist (…)`.
-- Widevine/DRM ve YouTube `n=` cipher: kod yok (tespit + temiz ret).
+- Widevine/DRM: destek yok; YouTube signature çözümleme paketli yt-dlp/Deno ile yapılır.
 - Safari yok (ayrı Safari App Extension gerekir).

@@ -75,6 +75,13 @@ impl Queue {
         self.items.get_mut(position)
     }
 
+    fn remove(&mut self, id: &str) -> bool {
+        let old = self.items.len();
+        self.items.retain(|entry| entry.id != id);
+        self.index = self.items.iter().enumerate().map(|(i, entry)| (entry.id.clone(), i)).collect();
+        self.items.len() != old
+    }
+
     fn len(&self) -> usize {
         self.items.len()
     }
@@ -98,6 +105,8 @@ pub struct CaptureState {
     store: crate::store::Store,
     paused: Mutex<std::collections::HashSet<String>>,
     pump_lock: Mutex<()>,
+    removed: Mutex<std::collections::HashSet<String>>,
+    context_replies: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<hazar_engine::ytdlp::BrowserContext, String>>>>,
 }
 
 impl CaptureState {
@@ -107,6 +116,25 @@ impl CaptureState {
             &self.queue(),
             &self.requests.lock().expect("requests"),
         )
+    }
+
+    pub fn remove_job(&self, app: &AppHandle, id: &str) -> Result<bool, String> {
+        let _pump = self.pump_lock.lock().expect("pump");
+        self.removed.lock().expect("removed").insert(id.into());
+        self.cancel(id);
+        self.pending.lock().expect("pending").retain(|job| job.id != id);
+        let removed = self.queue.lock().expect("queue").remove(id);
+        self.requests.lock().expect("requests").remove(id);
+        self.paused.lock().expect("paused").remove(id);
+        self.persist()?;
+        self.emit_queue(app);
+        self.emit_status(app);
+        Ok(removed)
+    }
+
+    pub fn clear_jobs(&self, app: &AppHandle) -> Result<(), String> {
+        for entry in self.queue() { self.remove_job(app, &entry.id)?; }
+        Ok(())
     }
 
     pub fn pause(&self, id: &str) -> bool {
@@ -301,6 +329,26 @@ impl CaptureState {
             Inbound::Grab(grab) => {
                 enqueue(state, app, grab.id, grab.request, "extension");
             }
+            Inbound::Extract(grab) => {
+                let state = state.clone();
+                tauri::async_runtime::spawn(async move {
+                    let context = extractor_context(&grab.request);
+                    let result = match tokio::time::timeout(Duration::from_secs(58), hazar_engine::ytdlp::probe(&grab.request.url, &context)).await {
+                        Ok(result) => result,
+                        Err(_) => Err(hazar_engine::Error::Protocol("yt-dlp analiz timeout".into())),
+                    };
+                    let (title, error) = match result {
+                        Ok(title) => (title, None),
+                        Err(error) => (None, Some(hazar_engine::ytdlp::diagnostic(&error.to_string()))),
+                    };
+                    state.broadcast(Outbound::Extracted { id: grab.id, title, error });
+                });
+            }
+            Inbound::Context(reply) => {
+                if let Some(sender) = state.context_replies.lock().expect("context replies").remove(&reply.id) {
+                    let _ = sender.send(reply.context.ok_or_else(|| reply.error.unwrap_or_else(|| "Browser session bulunamadı".into())));
+                }
+            }
             Inbound::Cancel(cancel) => {
                 let removed = state.drop_pending(&cancel.id);
                 if removed {
@@ -314,6 +362,13 @@ impl CaptureState {
             }
             Inbound::Bytes(bytes) => {
                 on_bytes(state, app, bytes);
+            }
+            Inbound::CaptureFailed(failed) => {
+                let reason = redact_error(&failed.reason.chars().take(512).collect::<String>());
+                state.cancel(&failed.id);
+                state.update(&failed.id, |entry| { entry.state = "failed".into(); entry.error = Some(reason.clone()); });
+                state.broadcast(Outbound::Failed { id: failed.id, reason });
+                state.emit_queue(app);
             }
             Inbound::Media(_) | Inbound::Ping(_) => {}
         }
@@ -373,6 +428,13 @@ pub(crate) fn enqueue(
     source: &str,
 ) {
     let mut request = request;
+    let youtube = hazar_engine::ytdlp::canonical_url(&request.url);
+    if youtube.is_some() || request.extractor.as_deref() == Some("ytdlp") {
+        if let Some(url) = &youtube { request.url = url.clone(); }
+        request.kind = GrabKind::File;
+        let filename = request.filename.get_or_insert_with(|| "Video".into());
+        if !filename.to_lowercase().ends_with(".mp4") { filename.push_str(".mp4"); }
+    }
     if state.requests.lock().expect("requests").contains_key(&id)
         && state.queue().iter().any(|e| {
             e.id == id && matches!(e.state.as_str(), "queued" | "scheduled" | "downloading")
@@ -383,6 +445,9 @@ pub(crate) fn enqueue(
     let settings = state.settings();
     let existing = state.queue().into_iter().find(|e| e.id == id).and_then(|e| e.path).map(PathBuf::from);
     let mut dest = existing.unwrap_or_else(|| resolve_dest(&request, &settings));
+    if (youtube.is_some() || request.extractor.as_deref() == Some("ytdlp")) && !dest.extension().is_some_and(|ext| ext == "mp4") {
+        dest = PathBuf::from(format!("{}.mp4", dest.display()));
+    }
     let original = dest.clone();
     let mut suffix = 1;
     while state.queue().iter().any(|e| e.id != id && e.path.as_deref() == Some(dest.to_string_lossy().as_ref())) {
@@ -535,11 +600,11 @@ pub fn start(app: AppHandle, settings: Settings) -> Arc<CaptureState> {
         for mut entry in saved.entries {
             if matches!(
                 entry.state.as_str(),
-                "downloading" | "queued" | "scheduled" | "cancelling"
+                "downloading" | "queued" | "scheduled" | "cancelling" | "assembling"
             ) {
                 entry.state = "interrupted".into();
             }
-            if entry.kind == "hls" && entry.state == "done" {
+            if (entry.kind == "hls" || hazar_engine::ytdlp::canonical_url(&entry.url).is_some()) && entry.state == "done" {
                 if let Some(path) = &entry.path {
                     use std::io::Read;
                     if let Ok(mut file) = std::fs::File::open(path) {
@@ -547,7 +612,7 @@ pub fn start(app: AppHandle, settings: Settings) -> Arc<CaptureState> {
                         if let Ok(n) = file.read(&mut prefix) {
                             if hazar_engine::hls::validate_media_body(&prefix[..n]).is_err() {
                                 entry.state = "failed".into();
-                                entry.error = Some("Eski capture video yerine playlist kaydetmiş; tarayıcıdan yeniden gönder".into());
+                                entry.error = Some("Eski download video yerine HTML/playlist kaydetmiş; yeniden indir".into());
                             }
                         }
                     }
@@ -570,6 +635,8 @@ pub fn start(app: AppHandle, settings: Settings) -> Arc<CaptureState> {
         store,
         paused: Mutex::new(std::collections::HashSet::new()),
         pump_lock: Mutex::new(()),
+        removed: Mutex::new(std::collections::HashSet::new()),
+        context_replies: Mutex::new(HashMap::new()),
     });
 
     // Zamanlanmış işleri pencere açıldığında başlat.
@@ -637,6 +704,9 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
         GrabKind::Dash => "dash",
     };
 
+    {
+    let removed = state.removed.lock().expect("removed");
+    if removed.contains(&id) { return; }
     state.queue.lock().expect("queue lock").upsert(QueueEntry {
         id: id.clone(),
         url: request.url.clone(),
@@ -649,6 +719,7 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
         path: Some(dest.to_string_lossy().into_owned()),
         error: None,
     });
+    }
     state.emit_queue(&app);
 
     let cancel = state.cancels.lock().expect("cancel lock").get(&id).cloned().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
@@ -710,6 +781,26 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
             .join(", ")
     );
     let result: GrabResult = match request.kind {
+        GrabKind::File if request.extractor.as_deref() == Some("ytdlp") || hazar_engine::ytdlp::canonical_url(&request.url).is_some() => {
+            let started = Instant::now();
+            let context = if let Some(tab_id) = request.tab_id.filter(|id| *id >= 0) {
+                let (sender, receiver) = tokio::sync::oneshot::channel();
+                state.context_replies.lock().expect("context replies").insert(id.clone(), sender);
+                state.broadcast(Outbound::RefreshContext { id: id.clone(), url: request.url.clone(), page_url: request.page_url.clone(), tab_id });
+                let refreshed = tokio::time::timeout(Duration::from_secs(8), receiver).await;
+                state.context_replies.lock().expect("context replies").remove(&id);
+                match refreshed {
+                    Ok(Ok(context)) => context,
+                    _ => Err("Browser session yenilenemedi. Video sayfasını açıp extension’dan tekrar gönder.".into()),
+                }
+            } else { Ok(extractor_context(&request)) };
+            match context {
+                Ok(context) => hazar_engine::ytdlp::download(&request.url, &dest, cancel.clone(), request.expected_sha256.as_deref(), request.speed_limit_bps, &context, tx).await
+                .map(|(size, digest)| (dest.clone(), size, digest, started.elapsed().as_millis() as u64))
+                .map_err(|error| { if matches!(error, hazar_engine::Error::Cancelled) { error.to_string() } else { let issue = hazar_engine::ytdlp::diagnostic(&error.to_string()); format!("[{}] {}", issue.code, issue.message) } }),
+                Err(reason) => Err(reason),
+            }
+        }
         GrabKind::File => {
             let mut opts = DownloadOptions::new(&request.url, &dest)
                 .connections(connections)
@@ -845,6 +936,14 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
 
 /// Tarayıcıdan gelen segment gövdesini diske yazar; son parçada birleştirir.
 fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::Bytes) {
+    if state.removed.lock().expect("removed").contains(&bytes.stream_id) {
+        state.broadcast(Outbound::Failed { id: bytes.stream_id, reason: "Download listeden silindi".into() });
+        return;
+    }
+    if state.queue().iter().any(|entry| entry.id == bytes.stream_id && matches!(entry.state.as_str(), "done" | "assembling")) {
+        state.broadcast(Outbound::BytesAck { stream_id: bytes.stream_id, index: bytes.index });
+        return;
+    }
     if bytes.stream_id.is_empty()
         || bytes.stream_id.len() > 128
         || !bytes
@@ -853,6 +952,7 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
         || bytes.total == 0
         || bytes.total > 20000
+        || bytes.audio_start.is_some_and(|start| start == 0 || start >= bytes.total)
         || bytes.index >= bytes.total
         || bytes.data_b64.len() > 24 * 1024 * 1024
     {
@@ -860,6 +960,12 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
             id: bytes.stream_id,
             reason: "invalid capture chunk".into(),
         });
+        return;
+    }
+    let cancel = state.cancels.lock().expect("cancels")
+        .entry(bytes.stream_id.clone()).or_insert_with(|| Arc::new(AtomicBool::new(false))).clone();
+    if cancel.load(Ordering::Relaxed) {
+        state.broadcast(Outbound::Failed { id: bytes.stream_id, reason: "Download durduruldu".into() });
         return;
     }
     let settings = state.settings();
@@ -881,7 +987,7 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
     }
 
     let descriptor = stream_dir.join("capture.json");
-    let descriptor_value = serde_json::json!({ "total": bytes.total, "name": name });
+    let descriptor_value = serde_json::json!({ "total": bytes.total, "name": name, "audio_start": bytes.audio_start });
     if let Ok(raw) = std::fs::read(&descriptor) {
         if serde_json::from_slice::<serde_json::Value>(&raw).ok().as_ref() != Some(&descriptor_value) {
             state.broadcast(Outbound::Failed { id: bytes.stream_id, reason: "capture plan changed".into() }); return;
@@ -973,56 +1079,72 @@ fn on_bytes(state: &Arc<CaptureState>, app: &AppHandle, bytes: hazar_localapi::B
         out_path = Path::new(&dir).join(format!("{}-{counter}.ts", name.trim_end_matches(".ts")));
         counter += 1;
     }
-    let assembling = out_path.with_extension("assembling");
-    let mut out = match std::fs::File::create(&assembling) {
-        Ok(file) => file,
-        Err(error) => {
-            eprintln!("hazar: assemble create failed: {error}");
-            return;
-        }
-    };
-    let mut appended = 0u64;
-    for index in 0..bytes.total {
-        let part = stream_dir.join(format!("part-{index:05}.bin"));
-        match std::fs::read(&part) {
-            Ok(chunk) => {
-                use std::io::Write;
-                if out.write_all(&chunk).is_err() {
-                    eprintln!("hazar: assemble write failed");
-                    return;
-                }
-                appended += chunk.len() as u64;
-            }
-            Err(error) => {
-                eprintln!("hazar: missing part {index}: {error}");
-                return;
-            }
-        }
-    }
-    if let Err(error) = out.sync_all() { eprintln!("hazar: capture sync failed: {error}"); return; }
-    drop(out);
-    if let Err(error) = std::fs::rename(&assembling, &out_path) {
-        eprintln!("hazar: assemble rename failed: {error}");
+    // Only one finalizer may assemble/mux a stream, even after a repeated ACK.
+    let marker = stream_dir.join("assembling.lock");
+    if std::fs::OpenOptions::new().write(true).create_new(true).open(&marker).is_err() {
         return;
     }
-    let _ = std::fs::remove_dir_all(&stream_dir);
+    let state = Arc::clone(state);
+    let app = app.clone();
+    // Keep the bridge responsive while FFmpeg muxes the captured tracks.
+    state.update(&bytes.stream_id, |entry| entry.state = "assembling".into());
+    state.emit_queue(&app);
+    tokio::spawn(async move {
+        let result: Result<u64, String> = async {
+            let assembling = stream_dir.join("video.ts");
+            let video_end = bytes.audio_start.unwrap_or(bytes.total);
+            assemble_capture_parts(&stream_dir, 0, video_end, &assembling, &cancel).await?;
+            if let Some(audio_start) = bytes.audio_start {
+                let audio = stream_dir.join("audio.ts");
+                assemble_capture_parts(&stream_dir, audio_start, bytes.total, &audio, &cancel).await?;
+                hazar_engine::media::mux(&assembling, &audio, &out_path, Some(cancel.clone()))
+                    .await.map_err(|error| error.to_string())?;
+            } else {
+                if cancel.load(Ordering::Relaxed) { return Err("Download durduruldu".into()); }
+                tokio::fs::rename(&assembling, &out_path).await.map_err(|e| e.to_string())?;
+            }
+            let size = tokio::fs::metadata(&out_path).await.map_err(|e| e.to_string())?.len();
+            let _ = tokio::fs::remove_dir_all(&stream_dir).await;
+            Ok(size)
+        }.await;
+        match result {
+            Ok(size) => {
+                let path = out_path.display().to_string();
+                state.update(&bytes.stream_id, |entry| {
+                    entry.state = "done".into();
+                    entry.written = size;
+                    entry.total = size;
+                    entry.path = Some(path.clone());
+                    entry.error = None;
+                });
+                state.broadcast(Outbound::Finished {
+                    id: bytes.stream_id.clone(), path, size,
+                    sha256: None, elapsed_ms: 0,
+                });
+            }
+            Err(reason) => {
+                let _ = tokio::fs::remove_file(&marker).await;
+                state.update(&bytes.stream_id, |entry| {
+                    entry.state = "failed".into(); entry.error = Some(reason.clone());
+                });
+                state.broadcast(Outbound::Failed { id: bytes.stream_id.clone(), reason });
+            }
+        }
+        state.cancels.lock().expect("cancels").remove(&bytes.stream_id);
+        state.emit_queue(&app);
+        state.emit_status(&app);
+    });
+}
 
-    let path = out_path.display().to_string();
-    state.update(&bytes.stream_id, |entry| {
-        entry.state = "done".into();
-        entry.written = appended;
-        entry.total = appended;
-        entry.path = Some(path.clone());
-    });
-    state.broadcast(Outbound::Finished {
-        id: bytes.stream_id.clone(),
-        path,
-        size: appended,
-        sha256: None,
-        elapsed_ms: 0,
-    });
-    state.emit_queue(app);
-    state.emit_status(app);
+async fn assemble_capture_parts(dir: &Path, start: u32, end: u32, output: &Path, cancel: &AtomicBool) -> Result<(), String> {
+    let mut out = tokio::fs::File::create(output).await.map_err(|e| e.to_string())?;
+    for index in start..end {
+        if cancel.load(Ordering::Relaxed) { return Err("Download durduruldu".into()); }
+        let mut part = tokio::fs::File::open(dir.join(format!("part-{index:05}.bin")))
+            .await.map_err(|e| e.to_string())?;
+        tokio::io::copy(&mut part, &mut out).await.map_err(|e| e.to_string())?;
+    }
+    out.sync_all().await.map_err(|e| e.to_string())
 }
 
 /// Küçük, bağımlılıksız base64 çözücü (segment gövdeleri için).
@@ -1236,4 +1358,11 @@ mod tests {
         let out = capture_headers(&[], Some("   "), Some(""));
         assert!(out.is_empty(), "boş değerler eklenmemeli: {out:?}");
     }
+}
+
+fn extractor_context(request: &GrabRequest) -> hazar_engine::ytdlp::BrowserContext {
+    request.browser_context.clone().unwrap_or_else(|| hazar_engine::ytdlp::BrowserContext {
+        cookies: request.browser_cookies.clone(), referer: request.referer.clone(), user_agent: request.user_agent.clone(),
+        ..Default::default()
+    })
 }

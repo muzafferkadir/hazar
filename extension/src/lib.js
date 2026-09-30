@@ -165,6 +165,19 @@
     return sanitizeFilename((pageTitle ? pageTitle + "-" : "") + (base || "download"));
   }
 
+  function youtubeVideoUrl(raw) {
+    try {
+      const url = new URL(raw), parts = url.pathname.split('/').filter(Boolean);
+      if (!['http:', 'https:'].includes(url.protocol)) return null;
+      let id = null;
+      if (url.hostname === 'youtu.be') id = parts[0];
+      else if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com'].includes(url.hostname)) {
+        id = url.pathname === '/watch' ? url.searchParams.get('v') : ['embed', 'shorts', 'live'].includes(parts[0]) ? parts[1] : null;
+      }
+      return /^[a-zA-Z0-9_-]{11}$/.test(id || '') ? `https://www.youtube.com/watch?v=${id}` : null;
+    } catch (_) { return null; }
+  }
+
   function cookieHeader(cookies) {
     return (cookies || [])
       .filter((cookie) => cookie && cookie.name)
@@ -229,31 +242,103 @@
    * Master playlist ise en yüksek BANDWIDTH'li varyantın URL'ini döndürür.
    * (Gerçek bölümlerde içerik önce varyant playlist'te listelenir.)
    */
-  function bestVariantFromPlaylist(text, baseUrl) {
-    const source = String(text || "");
-    if (!source.includes("#EXT-X-STREAM-INF")) return null;
-    let best = null;
+  function variantsFromPlaylist(text, baseUrl) {
+    const variants = [];
     let pending = null;
-    for (const raw of source.split(String.fromCharCode(10))) {
+    for (const raw of String(text || "").split(/\r?\n/)) {
       const line = raw.trim();
-      if (!line) continue;
       if (line.startsWith("#EXT-X-STREAM-INF:")) {
-        const match = /BANDWIDTH=(\d+)/i.exec(line);
-        pending = { bandwidth: match ? Number(match[1]) : 0, uri: null };
-        continue;
-      }
-      if (pending && !line.startsWith("#")) {
-        pending.uri = line;
-        if (!best || pending.bandwidth > best.bandwidth) best = pending;
+        const bandwidth = /(?:^|,)BANDWIDTH=(\d+)/.exec(line.split(":").slice(1).join(":"));
+        const resolution = /RESOLUTION=(\d+)x(\d+)/.exec(line);
+        pending = { bandwidth: bandwidth ? Number(bandwidth[1]) : 0,
+          height: resolution ? Number(resolution[2]) : null };
+      } else if (pending && line && !line.startsWith("#")) {
+        try { variants.push({ ...pending, url: new URL(line, baseUrl).href }); } catch (_) {}
         pending = null;
       }
     }
-    if (!best || !best.uri) return null;
-    try {
-      return new URL(best.uri, baseUrl).toString();
-    } catch (_) {
-      return null;
+    return variants.sort((a, b) => b.bandwidth - a.bandwidth);
+  }
+
+  function bestVariantFromPlaylist(text, baseUrl) {
+    return variantsFromPlaylist(text, baseUrl)[0]?.url || null;
+  }
+
+  function playlistAttributes(line) {
+    return Object.fromEntries([...line.matchAll(/([A-Z0-9-]+)=("[^"]*"|[^,]*)/g)]
+      .map(m => [m[1], m[2].replace(/^"|"$/g, "")]));
+  }
+
+  // Preserve initialization, ranges and AES-128 while planning browser capture.
+  function capturePlanFromPlaylist(text, baseUrl) {
+    const plan = [];
+    let key = null, sequence = 0n, pendingRange = null, previous = null, previousMap = null, mapId = null;
+    const ivFor = (explicit, seq) => {
+      const value = explicit ? explicit.replace(/^0x/i, "") : seq.toString(16);
+      if (!/^[0-9a-f]+$/i.test(value) || value.length > 32) throw new Error("HLS IV geçersiz");
+      return value.padStart(32, "0");
+    };
+    const rangeFor = (value, url, prior) => {
+      if (!value) return null;
+      const match = /^(\d+)(?:@(\d+))?$/.exec(value);
+      if (!match) throw new Error("HLS BYTERANGE geçersiz");
+      const start = match[2] != null ? Number(match[2]) : prior?.url === url ? prior.end + 1 : NaN;
+      const length = Number(match[1]), end = start + length - 1;
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || length <= 0) throw new Error("HLS BYTERANGE offset bulunamadı");
+      return { start, end };
+    };
+    for (const raw of String(text).split(/\r?\n/)) {
+      const line = raw.trim();
+      if (line.startsWith("#EXT-X-MEDIA-SEQUENCE:")) sequence = BigInt(line.split(":")[1]);
+      else if (line.startsWith("#EXT-X-KEY:")) {
+        const a = playlistAttributes(line);
+        if (a.METHOD === "NONE") key = null;
+        else if (a.METHOD === "AES-128" && (!a.KEYFORMAT || a.KEYFORMAT === "identity") && a.URI) {
+          key = { url: new URL(a.URI, baseUrl).href, iv: a.IV || null };
+        } else throw new Error("Bu HLS şifreleme yöntemi desteklenmiyor");
+      } else if (line.startsWith("#EXT-X-BYTERANGE:")) pendingRange = line.split(":")[1];
+      else if (line.startsWith("#EXT-X-MAP:")) {
+        const a = playlistAttributes(line);
+        if (!a.URI) throw new Error("HLS init segment URI bulunamadı");
+        const url = new URL(a.URI, baseUrl).href;
+        const range = rangeFor(a.BYTERANGE, url, previousMap);
+        if (key && !key.iv) throw new Error("AES-128 init segment IV gerekli");
+        const map = { url, range, init: true, key: key ? { url: key.url, iv: ivFor(key.iv, sequence) } : null };
+        const id = JSON.stringify(map);
+        if (mapId !== id) { plan.push(map); mapId = id; }
+        previousMap = range ? { url, end: range.end } : null;
+      } else if (line && !line.startsWith("#")) {
+        const url = new URL(line, baseUrl).href;
+        const range = rangeFor(pendingRange, url, previous);
+        plan.push({ url, range, key: key ? { url: key.url, iv: ivFor(key.iv, sequence) } : null });
+        previous = range ? { url, end: range.end } : null;
+        pendingRange = null; sequence += 1n;
+      }
     }
+    return plan;
+  }
+
+  // Match the selected variant's AUDIO group, including quoted attribute values.
+  function audioRenditionFromPlaylist(text, baseUrl, variantUrl) {
+    const attributes = playlistAttributes;
+    const lines = String(text || "").split(/\r?\n/).map(l => l.trim());
+    let group = null;
+    let pending = null;
+    for (const line of lines) {
+      if (line.startsWith("#EXT-X-STREAM-INF:")) pending = attributes(line);
+      else if (pending && line && !line.startsWith("#")) {
+        if (new URL(line, baseUrl).href === variantUrl) group = pending.AUDIO;
+        pending = null;
+      }
+    }
+    if (!group) return null;
+    const choices = lines.filter(l => l.startsWith("#EXT-X-MEDIA:"))
+      .map(attributes).filter(a => a.TYPE === "AUDIO" && a["GROUP-ID"] === group);
+    if (!choices.length) throw new Error("Master playlist audio grubu bulunamadı");
+    const chosen = choices.find(a => a.DEFAULT === "YES")
+      || choices.find(a => a.AUTOSELECT === "YES") || choices[0];
+    // No URI means the audio is embedded in the video rendition.
+    return chosen.URI ? new URL(chosen.URI, baseUrl).href : null;
   }
 
   /**
@@ -411,9 +496,13 @@
     sanitizeFilename,
     outputName,
     cookieHeader,
+    youtubeVideoUrl,
     groupSegments,
     segmentsFromPlaylist,
     bestVariantFromPlaylist,
+    variantsFromPlaylist,
+    audioRenditionFromPlaylist,
+    capturePlanFromPlaylist,
     preferSniffedSegments,
     humanizeError,
     statusish,

@@ -73,18 +73,30 @@ async function renderCandidates() {
   const response = await send({ type: "candidates", tabId: tab.id });
   const candidates = (response.candidates || []).filter((item) => item.url);
   // Her 2 saniyede DOM'u baştan çizmek flicker yaratıyordu: içerik değişmediyse dur.
-  if (!changed("candidates", candidates.map((item) => [item.url, item.kind, item.segments?.length ?? 0]))) {
+  if (!changed("candidates", [tab.id, response.extractor, candidates.map((item) => [item.url, item.kind, item.extractor, item.segments?.length ?? 0])])) {
     return;
   }
 
   const container = document.getElementById("candidates");
   container.textContent = "";
+  if (response.extractor?.pending) container.append(el("div", { className: "dim", textContent: "yt-dlp analiz ediyor…" }));
+  if (response.extractor?.error) {
+    const retry = el("button", { textContent: "Tekrar analiz et" });
+    retry.addEventListener("click", async () => {
+      retry.disabled = true;
+      const result = await send({ type: "retry_extractor", tabId: tab.id });
+      if (!result.ok) retry.textContent = result.error;
+      rendered.delete("candidates"); await renderCandidates();
+    });
+    container.append(el("div", { className: "extractor-error" }, [
+      el("div", { textContent: `yt-dlp · ${response.extractor.error.message}` }), retry]));
+  }
   if (!candidates.length) {
     container.append(el("div", { className: "empty", textContent: "Aday yok." }));
     return;
   }
 
-  for (const candidate of candidates.slice(0, 8)) {
+  for (const candidate of [...candidates.filter(c => !c.extractor).slice(0, 8), ...candidates.filter(c => c.extractor)]) {
     const segments = candidate.segments || candidate.streams || [];
     const name = candidate.filename || candidate.url.split("/").pop() || candidate.url;
     const encrypted = Boolean(candidate.encrypted);
@@ -152,6 +164,8 @@ async function renderCandidates() {
         tabId: tab.id,
         url: candidate.url,
         kind: candidate.kind,
+        extractor: candidate.extractor,
+        filename: candidate.filename,
         pageUrl: candidate.pageUrl,
         pageTitle: tab.title,
         segments,
@@ -172,10 +186,10 @@ async function renderCandidates() {
     });
 
     container.append(
-      el("div", { className: "row" }, [
+      el("div", { className: candidate.extractor === "ytdlp" ? "row ytdlp" : "row" }, [
         el("div", { className: "meta" }, [
           el("div", { className: "name" }, [
-            el("span", { className: "kind", textContent: candidate.kind || "file" }),
+            el("span", { className: "kind", textContent: candidate.extractor === "ytdlp" ? "yt-dlp" : candidate.kind || "file" }),
             document.createTextNode(name),
           ]),
           el("div", { className: "dim", textContent: detail }),
@@ -263,4 +277,5 @@ refresh();
 setInterval(() => {
   renderStatus();
   renderRecent();
+  renderCandidates();
 }, 2000);

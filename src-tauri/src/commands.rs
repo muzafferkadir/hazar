@@ -150,6 +150,9 @@ pub fn queue_add(
         .map(|value| (value * 1024.0 * 1024.0) as u64);
     let request = hazar_localapi::GrabRequest {
         url: url.clone(),
+        extractor: None,
+        browser_cookies: Vec::new(),
+        browser_context: None,
         kind,
         filename: std::path::Path::new(&dest)
             .file_name()
@@ -192,4 +195,14 @@ pub fn queue_resume(
     url: Option<String>,
 ) -> Result<(), String> {
     CaptureState::resume(state.inner(), &app, &id, url)
+}
+
+#[tauri::command]
+pub fn queue_remove(app: AppHandle, state: State<'_, Arc<CaptureState>>, id: String) -> Result<bool, String> {
+    state.remove_job(&app, &id)
+}
+
+#[tauri::command]
+pub fn queue_clear(app: AppHandle, state: State<'_, Arc<CaptureState>>) -> Result<(), String> {
+    state.clear_jobs(&app)
 }

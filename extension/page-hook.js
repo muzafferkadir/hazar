@@ -73,10 +73,16 @@
             this.addEventListener("load", () => {
               try {
                 const mime = this.getResponseHeader && this.getResponseHeader("content-type");
-                const kind = classify(url, mime);
-                if (kind) post(kind, url, mime);
-                if (kind === "manifest" && typeof this.responseText === "string") {
-                  reportManifestBody(url, mime, this.responseText);
+                const finalUrl = this.responseURL || url;
+                const kind = classify(finalUrl, mime) || classify(url, mime);
+                if (kind) post(kind, finalUrl, mime);
+                if (kind === "manifest") {
+                  if (!this.responseType || this.responseType === "text") reportManifestBody(finalUrl, mime, this.responseText);
+                  else if (this.responseType === "arraybuffer" && this.response?.byteLength <= 512 * 1024) {
+                    reportManifestBody(finalUrl, mime, new TextDecoder().decode(this.response));
+                  } else if (this.responseType === "blob" && this.response?.size <= 512 * 1024) {
+                    this.response.text().then(body => reportManifestBody(finalUrl, mime, body)).catch(() => {});
+                  }
                 }
               } catch (_) {
                 /* ignore */
@@ -107,13 +113,14 @@
               .then((response) => {
                 try {
                   const mime = response && response.headers && response.headers.get("content-type");
-                  const kind = classify(url, mime);
-                  if (kind) post(kind, url, mime);
+                  const finalUrl = response.url || url;
+                  const kind = classify(finalUrl, mime) || classify(url, mime);
+                  if (kind) post(kind, finalUrl, mime);
                   if (kind === "manifest" && response && typeof response.clone === "function") {
                     response
                       .clone()
                       .text()
-                      .then((text) => reportManifestBody(url, mime, text))
+                      .then((text) => reportManifestBody(finalUrl, mime, text))
                       .catch(() => {});
                   }
                 } catch (_) {

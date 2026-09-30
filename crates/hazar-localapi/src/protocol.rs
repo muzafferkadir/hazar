@@ -15,22 +15,27 @@ pub const SUBPROTOCOL: &str = "hazar.v1";
 pub enum Inbound {
     Hello(Hello),
     Grab(Grab),
+    Extract(Grab),
+    Context(ContextReply),
     Cancel(Cancel),
     Media(MediaCandidates),
     Ping(Ping),
     /// Oynatıcı oturumunda indirilen segment gövdesi (tek kullanımlık token sorununu atlar).
     Bytes(Bytes),
+    CaptureFailed(CaptureFailed),
 }
 
 impl Inbound {
     pub fn session(&self) -> Option<&str> {
         match self {
             Inbound::Hello(_) => None,
-            Inbound::Grab(m) => m.session.as_deref(),
+            Inbound::Grab(m) | Inbound::Extract(m) => m.session.as_deref(),
+            Inbound::Context(m) => m.session.as_deref(),
             Inbound::Cancel(m) => m.session.as_deref(),
             Inbound::Media(m) => m.session.as_deref(),
             Inbound::Ping(m) => m.session.as_deref(),
             Inbound::Bytes(m) => m.session.as_deref(),
+            Inbound::CaptureFailed(m) => m.session.as_deref(),
         }
     }
 }
@@ -54,6 +59,13 @@ pub struct Grab {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextReply {
+    pub session: Option<String>, pub id: String,
+    pub context: Option<hazar_engine::ytdlp::BrowserContext>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cancel {
     #[serde(default)]
     pub session: Option<String>,
@@ -70,6 +82,13 @@ pub struct MediaCandidates {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptureFailed {
+    pub session: Option<String>,
+    pub id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytes {
     #[serde(default)]
     pub session: Option<String>,
@@ -77,6 +96,9 @@ pub struct Bytes {
     pub stream_id: String,
     pub index: u32,
     pub total: u32,
+    /// First separate audio chunk; preceding chunks belong to video.
+    #[serde(default)]
+    pub audio_start: Option<u32>,
     #[serde(default)]
     pub url: Option<String>,
     #[serde(default)]
@@ -104,6 +126,12 @@ pub enum GrabKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrabRequest {
     pub url: String,
+    #[serde(default)]
+    pub extractor: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub browser_cookies: Vec<hazar_engine::ytdlp::BrowserCookie>,
+    #[serde(default, skip_serializing)]
+    pub browser_context: Option<hazar_engine::ytdlp::BrowserContext>,
     pub kind: GrabKind,
     #[serde(default)]
     pub filename: Option<String>,
@@ -177,6 +205,8 @@ pub enum Outbound {
         features: Vec<String>,
         settings: Settings,
     },
+    RefreshContext { id: String, url: String, page_url: Option<String>, tab_id: i64 },
+    Extracted { id: String, title: Option<String>, error: Option<hazar_engine::ytdlp::Diagnostic>, },
     HelloErr {
         reason: String,
     },

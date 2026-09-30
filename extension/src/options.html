@@ -2,27 +2,27 @@
 <html lang="tr">
   <head>
     <meta charset="UTF-8" />
-    <title>Hazar — Ayarlar</title>
+    <title>Hazar Download Manager — Ayarlar</title>
+    <link rel="stylesheet" href="theme.css" />
     <style>
-      :root { color-scheme: dark; }
       body {
         margin: 0;
         padding: 16px 18px 24px;
         width: 420px;
-        background: #17171a;
-        color: rgba(255, 255, 255, 0.92);
+        background: var(--bg);
+        color: var(--text);
         font: 12px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, sans-serif;
       }
       h1 { display:flex; align-items:center; gap:8px; font-size: 14px; margin: 0 0 12px; }
-      label { display: block; margin-top: 12px; color: rgba(255, 255, 255, 0.7); }
+      label { display: block; margin-top: 12px; color: var(--dim); }
       input[type="text"], input[type="number"], textarea {
         width: 100%;
         margin-top: 4px;
         padding: 6px 8px;
-        background: #202024;
+        background: var(--card);
         color: inherit;
         font: inherit;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border: 1px solid var(--line);
         border-radius: 6px;
       }
       textarea { min-height: 74px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -31,18 +31,21 @@
       button {
         font: inherit;
         padding: 6px 12px;
-        color: #fff;
-        background: #6366f1;
+        color: var(--accent-contrast);
+        background: var(--accent);
+        font-weight: 600;
         border: 0;
         border-radius: 6px;
         cursor: pointer;
       }
-      .hint { color: rgba(255, 255, 255, 0.45); margin-top: 4px; }
-      #saved { color: #32d74b; opacity: 0; transition: opacity 0.2s; }
+      button:hover { background: var(--accent-hover); }
+      input[type="checkbox"] { accent-color: var(--accent); }
+      .hint { color: var(--dim); margin-top: 4px; }
+      #saved { color: var(--success); opacity: 0; transition: opacity 0.2s; }
     </style>
   </head>
   <body>
-    <h1><img src="../icons/32x32.png" width="24" height="24" alt="" /> Hazar Integration</h1>
+    <h1><img src="../icons/32x32.png" width="24" height="24" alt="" /> Hazar Download Manager</h1>
 
     <div class="row"><input type="checkbox" id="capture_enabled" /><label for="capture_enabled" style="margin: 0">İndirmeleri yakala</label></div>
     <div class="row"><input type="checkbox" id="capture_manifests" /><label for="capture_manifests" style="margin: 0">HLS/DASH streamlerini de yakala</label></div>
@@ -61,6 +64,13 @@
     <label for="deny_patterns">Yakalanmayacak URL regex'leri (satır başına bir tane)</label>
     <textarea id="deny_patterns"></textarea>
 
+    <details style="margin-top:16px">
+      <summary>yt-dlp network ayarları</summary>
+      <label for="ytdlp_proxy">Proxy URL</label><input type="text" id="ytdlp_proxy" placeholder="http://127.0.0.1:8080" />
+      <div class="hint">Boşsa browser ayarı kullanılır. PAC için URL gir. Proxy kullanmamak için direct yaz.</div>
+      <label for="ytdlp_source_address">Source IP (isteğe bağlı)</label><input type="text" id="ytdlp_source_address" />
+      <label for="ytdlp_impersonate_hosts">Browser impersonation gereken host’lar</label><textarea id="ytdlp_impersonate_hosts" placeholder="example.com"></textarea>
+    </details>
     <footer>
       <span id="saved">kaydedildi</span>
       <button id="save">Kaydet</button>

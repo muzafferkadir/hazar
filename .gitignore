@@ -10,3 +10,9 @@ src-tauri/gen
 src-tauri/media/ffmpeg*
 src-tauri/media/*.LICENSE
 src-tauri/media/SOURCES.txt
+
+src-tauri/media/yt-dlp*
+src-tauri/media/deno*
+src-tauri/media/YOUTUBE-SOURCES.txt
+
+src-tauri/media/pot/

@@ -33,3 +33,5 @@ if (process.platform === 'darwin') {
  await download('ffmpeg-win32-x64', 'ffmpeg.exe'); await download('win32-x64.LICENSE')
 } else { throw new Error('Media packaging supports macOS and Windows') }
 await writeFile(new URL('SOURCES.txt', dir), 'FFmpeg 6.1.1 standalone executable (separate process).\nBuilds and corresponding sources: https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1\nUpstream source: https://ffmpeg.org/releases/ffmpeg-6.1.1.tar.xz\nBuild license is included alongside the executable. Hazar code remains MIT.\n')
+
+await import("./package-youtube.mjs")

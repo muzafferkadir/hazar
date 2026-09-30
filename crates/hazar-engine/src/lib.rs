@@ -27,6 +27,7 @@ pub mod plan;
 pub mod probe;
 pub mod progress;
 pub mod resolve;
+pub mod ytdlp;
 
 pub use dash::{download_dash, DashOptions, DashOutcome, DashPlan};
 pub use download::{

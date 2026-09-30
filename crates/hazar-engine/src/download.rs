@@ -286,6 +286,10 @@ impl Downloader {
         });
 
         let info = self.probe_with_retry().await?;
+        if info.content_type.as_deref().is_some_and(|mime| mime.to_ascii_lowercase().starts_with("text/html") || mime.to_ascii_lowercase().starts_with("application/xhtml+xml"))
+            && !self.opts.dest.extension().is_some_and(|ext| matches!(ext.to_str(), Some("html" | "htm" | "xhtml"))) {
+            return Err(Error::Unsupported("Link video/dosya yerine HTML sayfası döndürdü; kaydedilmedi".into()));
+        }
         let Some(size) = info.len else {
             self.emit(ProgressEvent::FalldownSingle {
                 reason: "server did not report a size".into(),

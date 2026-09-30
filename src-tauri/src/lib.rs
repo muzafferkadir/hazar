@@ -24,6 +24,17 @@ pub fn run() {
                     std::env::set_var("HAZAR_FFMPEG", binary);
                 }
             }
+            if let Ok(dir) = app.path().resource_dir() {
+                for (key, name) in [("HAZAR_YTDLP", "yt-dlp"), ("HAZAR_DENO", "deno")] {
+                    let binary = dir.join("media").join(if cfg!(windows) { format!("{name}.exe") } else { name.into() });
+                    if binary.exists() { std::env::set_var(key, binary); }
+                }
+            }
+            if let Ok(dir) = app.path().resource_dir() {
+                let pot = dir.join("media/pot");
+                if pot.join("plugins").is_dir() { std::env::set_var("HAZAR_YTDLP_PLUGINS", pot.join("plugins")); }
+                if pot.join("server").is_dir() { std::env::set_var("HAZAR_POT_HOME", pot.join("server")); }
+            }
             // Browser-extension bridge (loopback WebSocket) + capture queue.
             let capture = bridge::start(app.handle().clone(), hazar_localapi::Settings::default());
             app.manage(capture);
@@ -32,13 +43,13 @@ pub fn run() {
             {
                 use tauri::menu::{Menu, MenuItem};
                 use tauri::tray::TrayIconBuilder;
-                let open = MenuItem::with_id(app, "open", "Hazar'ı Aç", true, None::<&str>)?;
-                let quit = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
+                let open = MenuItem::with_id(app, "open", "Open Hazar Download Manager", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&open, &quit])?;
                 if let Some(icon) = app.default_window_icon().cloned() {
                     TrayIconBuilder::new()
                         .icon(icon)
-                        .tooltip("Hazar — indirme yöneticisi")
+                        .tooltip("Hazar Download Manager")
                         .menu(&menu)
                         .show_menu_on_left_click(true)
                         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -83,6 +94,8 @@ pub fn run() {
             commands::queue_add,
             commands::queue_pause,
             commands::queue_resume,
+            commands::queue_remove,
+            commands::queue_clear,
             commands::extension_path,
             commands::extension_reveal,
             commands::extension_export

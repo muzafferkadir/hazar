@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Hazar Integration",
+  "name": "Hazar Download Manager",
   "description": "Hands downloads to the Hazar download manager: files, HLS and DASH streams.",
-  "version": "0.2.1",
+  "version": "0.2.5",
   "author": "Muzaffer Kadir Yılmaz",
   "minimum_chrome_version": "109",
   "action": {
-    "default_title": "Hazar",
+    "default_title": "Hazar Download Manager",
     "default_popup": "src/popup.html",
     "default_icon": {
       "16": "icons/16x16.png",
@@ -49,7 +49,8 @@
     "declarativeNetRequest",
     "storage",
     "contextMenus",
-    "alarms"
+    "alarms",
+    "proxy"
   ],
   "optional_permissions": [
     "notifications"

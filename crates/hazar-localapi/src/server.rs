@@ -62,6 +62,10 @@ impl Default for LocalApiConfig {
                 "media_candidates".into(),
                 "dash".into(),
                 "bytes_ack".into(),
+                "hls_audio_bytes".into(),
+                "youtube".into(),
+                "ytdlp".into(),
+                "ytdlp_context".into(),
             ],
             settings: Settings::default(),
             handshake_timeout: Duration::from_secs(10),
@@ -314,17 +318,17 @@ async fn handle_connection(
                                     let _ = send(&mut sink, &Outbound::Error { reason: "session mismatch".into() }).await;
                                     continue;
                                 }
-                                if let Inbound::Grab(grab) = &message {
+                                if let Inbound::Grab(grab) | Inbound::Extract(grab) = &message {
                                     let parsed = url::Url::parse(&grab.request.url);
                                     if !parsed.is_ok_and(|url| matches!(url.scheme(), "http" | "https")) || grab.request.method.as_deref().is_some_and(|m| m != "GET") {
                                         let _ = send(&mut sink, &Outbound::Error { reason: "only HTTP/HTTPS GET downloads are supported".into() }).await; continue;
                                     }
                                 }
-                                let job_id = match &message { Inbound::Grab(m) => Some(&m.id), Inbound::Cancel(m) => Some(&m.id), Inbound::Bytes(m) => Some(&m.stream_id), _ => None };
+                                let job_id = match &message { Inbound::Grab(m) | Inbound::Extract(m) => Some(&m.id), Inbound::Context(m) => Some(&m.id), Inbound::Cancel(m) => Some(&m.id), Inbound::Bytes(m) => Some(&m.stream_id), Inbound::CaptureFailed(m) => Some(&m.id), _ => None };
                                 let authorized = if let Some(id) = job_id {
                                     let mut owners = owners.lock().expect("owners");
                                     if id.is_empty() || id.len() > 128 || owners.len() >= 10000 { false }
-                                    else if matches!(message, Inbound::Cancel(_)) { owners.get(id) == Some(&identity) }
+                                    else if matches!(message, Inbound::Context(_) | Inbound::Cancel(_) | Inbound::CaptureFailed(_)) { owners.get(id) == Some(&identity) }
                                     else { owners.entry(id.clone()).or_insert_with(|| identity.clone()) == &identity }
                                 } else { true };
                                 if !authorized { let _ = send(&mut sink, &Outbound::Error { reason: "job belongs to another client".into() }).await; continue; }
@@ -355,12 +359,15 @@ async fn handle_connection(
                 match outgoing {
                     Ok(message) => {
                         let id = match &message {
-                            Outbound::GrabAck { id, .. } | Outbound::Progress { id, .. } | Outbound::Finished { id, .. } | Outbound::Failed { id, .. } => Some(id),
+                            Outbound::RefreshContext { id, .. } | Outbound::Extracted { id, .. } | Outbound::GrabAck { id, .. } | Outbound::Progress { id, .. } | Outbound::Finished { id, .. } | Outbound::Failed { id, .. } => Some(id),
                             Outbound::BytesAck { stream_id, .. } => Some(stream_id),
                             _ => None
                         };
                         let deliver = id.map(|id| owners.lock().expect("owners").get(id) == Some(&identity)).unwrap_or(true);
-                        if deliver { send(&mut sink, &message).await?; }
+                        if deliver {
+                            send(&mut sink, &message).await?;
+                            if let Outbound::Extracted { id, .. } = &message { owners.lock().expect("owners").remove(id); }
+                        }
                     },
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
                         eprintln!("hazar-localapi: client {client_id} lagged, dropped {skipped} messages");
