@@ -137,7 +137,10 @@
 
   /** Ham motor hatalarını kullanıcıya anlaşılır cümleye çevirir. */
   function humanize(message: string) {
-    if (/404/.test(message) && /\.m3u8|\.mpd/.test(message)) {
+    if (/403/.test(message)) {
+      return `bu bağlantı yalnızca oynatıcı oturumunda geçerli — videoyu oynatıp eklenti popup'ından "Segmentleri indir" seçeneğini kullan`
+    }
+    if (/404/.test(message) && /(\.m3u8|\.mpd|l\.php)/.test(message)) {
       return 'stream bağlantısının süresi dolmuş (oynatıcı token\'ı) — tarayıcıda videoyu yeniden başlatıp tekrar gönder'
     }
     if (/not an HLS playlist/.test(message)) {

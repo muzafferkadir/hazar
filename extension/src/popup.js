@@ -12,7 +12,10 @@ const send = (message) =>
 
 /** Ham motor hatalarını kullanıcıya anlaşılır cümleye çevirir (app ile aynı mantık). */
 function humanize(message) {
-  if (/404/.test(message) && /\.m3u8|\.mpd/.test(message)) {
+  if (/403/.test(message)) {
+    return "bu bağlantı yalnızca oynatıcı oturumunda geçerli — popup'ta \"Segmentleri indir\" çıkması gerekir; videoyu oynatıp tekrar dene";
+  }
+  if (/404/.test(message) && /(\.m3u8|\.mpd|l\.php)/.test(message)) {
     return "bağlantının süresi dolmuş (oynatıcı tek kullanımlık token) — videoyu oynatıp tekrar gönder";
   }
   if (/not an HLS playlist/.test(message)) {
@@ -54,9 +57,10 @@ async function renderStatus() {
   const group = document.getElementById("group");
 
   dot.classList.toggle("on", !!status.connected);
+  const extensionVersion = chrome.runtime.getManifest().version;
   label.textContent = status.connected
-    ? `${status.app ? status.app.app + " " + status.app.version : "bağlı"} · :${status.port}`
-    : "Hazar açık değil";
+    ? `${status.app ? status.app.app + " " + status.app.version : "bağlı"} · :${status.port} · ext ${extensionVersion}`
+    : `Hazar açık değil · ext ${extensionVersion}`;
   capture.checked = status.settings ? status.settings.capture_enabled !== false : true;
   group.checked = status.settings ? status.settings.group_hls !== false : true;
   capture.disabled = false;
