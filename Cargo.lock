@@ -1814,7 +1814,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hazar-app"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "hazar-engine",
  "hazar-localapi",
@@ -1833,7 +1833,7 @@ dependencies = [
 
 [[package]]
 name = "hazar-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "clap",
  "hazar-engine",
@@ -1842,7 +1842,7 @@ dependencies = [
 
 [[package]]
 name = "hazar-engine"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "aes",
  "cbc",
@@ -1858,7 +1858,7 @@ dependencies = [
 
 [[package]]
 name = "hazar-localapi"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "futures-util",
  "hazar-engine",
@@ -1871,7 +1871,7 @@ dependencies = [
 
 [[package]]
 name = "hazar-testmatrix"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "aes",
  "cbc",
