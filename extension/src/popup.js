@@ -51,14 +51,28 @@ async function renderStatus() {
   return status;
 }
 
+const rendered = new Map();
+
+function changed(key, value) {
+  const signature = JSON.stringify(value);
+  if (rendered.get(key) === signature) return false;
+  rendered.set(key, signature);
+  return true;
+}
+
 async function renderCandidates() {
-  const container = document.getElementById("candidates");
-  container.textContent = "";
   const tab = await activeTab();
   if (!tab) return;
 
   const response = await send({ type: "candidates", tabId: tab.id });
   const candidates = (response.candidates || []).filter((item) => item.url);
+  // Her 2 saniyede DOM'u baştan çizmek flicker yaratıyordu: içerik değişmediyse dur.
+  if (!changed("candidates", candidates.map((item) => [item.url, item.kind, item.segments?.length ?? 0]))) {
+    return;
+  }
+
+  const container = document.getElementById("candidates");
+  container.textContent = "";
   if (!candidates.length) {
     container.append(el("div", { className: "empty", textContent: "Aday yok." }));
     return;
@@ -71,12 +85,18 @@ async function renderCandidates() {
       candidate.kind,
       candidate.size ? humanBytes(candidate.size) : null,
       candidate.isManifest ? "playlist" : null,
+      encrypted ? "tarayıcıda şifreli" : null,
       segments.length ? `${segments.length} segment` : null,
     ]
       .filter(Boolean)
       .join(" · ");
 
-    const button = el("button", { className: "primary", textContent: "Hazar'a gönder" });
+    const encrypted = Boolean(candidate.encrypted);
+    const button = el("button", {
+      className: "primary",
+      textContent: encrypted ? "şifreli (indirilemez)" : "Hazar'a gönder",
+    });
+    if (encrypted) button.disabled = true;
     button.addEventListener("click", async () => {
       button.disabled = true;
       button.textContent = "gönderildi";
@@ -93,6 +113,11 @@ async function renderCandidates() {
         button.disabled = false;
       } else {
         setTimeout(renderRecent, 400);
+        // "gönderildi" durumunda takılı kalmasın.
+        setTimeout(() => {
+          button.textContent = "Hazar'a gönder";
+          button.disabled = false;
+        }, 4000);
       }
     });
 
@@ -112,10 +137,12 @@ async function renderCandidates() {
 }
 
 async function renderRecent() {
-  const container = document.getElementById("recent");
-  container.textContent = "";
   const stored = await chrome.storage.local.get({ recent: [] });
   const recent = (stored.recent || []).filter((item) => item.state);
+  if (!changed("recent", recent)) return;
+
+  const container = document.getElementById("recent");
+  container.textContent = "";
   if (!recent.length) {
     container.append(el("div", { className: "empty", textContent: "Henüz aktarım yok." }));
     return;
@@ -179,4 +206,4 @@ refresh();
 setInterval(() => {
   renderStatus();
   renderRecent();
-}, 1200);
+}, 2000);

@@ -35,6 +35,9 @@
     --radius-group: 10px;
     --radius-window: 10px;
 
+    /* Tüm form kontrolleri (input + buton) aynı yükseklikte. */
+    --control-h: 34px;
+
     --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
     --mono: 'SF Mono', 'Menlo', 'JetBrains Mono', monospace;
 }
@@ -71,6 +74,11 @@ select,
     width: 100vw;
     height: 100vh;
     background: var(--window);
+    /* flex olmadan .main-content'in flex:1 + overflow-y:auto ikilisi çalışmıyor
+       (içerik pencereden taşıyor, scroll oluşmuyordu). */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .container {
@@ -229,8 +237,16 @@ select,
 
 .input-group {
     display: flex;
+    align-items: center;
     gap: 8px;
     border-radius: var(--radius-field);
+}
+
+.input-group input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+    margin: 0;
 }
 
 .input-group.drag-over {
@@ -249,13 +265,13 @@ select,
 .select-input {
     min-width: 0;
     width: 100%;
-    height: 46px;
-    padding: 0 13px;
+    height: var(--control-h);
+    padding: 0 10px;
     background: var(--field);
     border: 1px solid var(--border);
     border-radius: var(--radius-field);
     color: var(--text);
-    font-size: 16px;
+    font-size: 13px;
     font-family: inherit;
     box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.25);
     transition: border-color 0.12s ease, box-shadow 0.12s ease;
@@ -335,8 +351,12 @@ button:focus-visible {
 
 /* macOS secondary (bezel) button */
 .browse-btn {
-    height: 46px;
-    padding: 0 16px;
+    height: var(--control-h);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 14px;
+    font-size: 13px;
     white-space: nowrap;
     background: var(--window-2);
     border: 1px solid var(--border-strong);

@@ -48,6 +48,10 @@ jobs:
       # Engine tests run before packaging so a broken download never ships.
       - run: cargo test -p hazar-engine
 
+      - name: Stamp the extension version (app version ile aynı)
+        if: matrix.platform == 'macos-14'
+        run: bash scripts/package-extension.sh "${{ github.ref_name }}" > /dev/null
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

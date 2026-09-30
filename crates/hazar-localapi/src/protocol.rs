@@ -112,6 +112,9 @@ pub struct GrabRequest {
     pub manifest: Option<String>,
     #[serde(default)]
     pub page_url: Option<String>,
+    /// Medya isteğini yapan frame (oynatıcı iframe'i) — doğru Referer/Origin için.
+    #[serde(default)]
+    pub frame_url: Option<String>,
     #[serde(default)]
     pub tab_id: Option<i64>,
     #[serde(default)]

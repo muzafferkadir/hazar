@@ -170,6 +170,7 @@ globalThis.__hazarCandidates = async (tabIdOrUrl) => {
         isManifest: !!candidate.isManifest,
         pageUrl: candidate.pageUrl || null,
         frameUrl: candidate.frameUrl || null,
+        encrypted: !!candidate.encrypted,
         segments: candidate.segments || grouped || null,
         tabId: Number(key),
       });
@@ -641,7 +642,17 @@ async function noteManifest(url, item) {
     const response = await fetch(url, { credentials: "include" });
     if (!response.ok) return;
     const text = await response.text();
-    if (!text.startsWith("#EXTM3U")) return;
+    if (!text.startsWith("#EXTM3U")) {
+      // Playlist düz metin değil (HTML/şifreli gövde) → oynatıcı bunu JS'te çözüyor,
+      // app bu bağlantıyı indiremez. Adayı işaretle, kullanıcı boşuna göndermesin.
+      const candidate = findCandidate(tabId, url);
+      if (candidate) {
+        candidate.encrypted = true;
+        candidate.mime = item.mime || candidate.mime;
+      }
+      debug("manifest is not plaintext (client-side encrypted?)", url);
+      return;
+    }
     const segments = text
       .split("\n")
       .map((line) => line.trim())
@@ -767,17 +778,19 @@ async function buildRequest({ url, kind, meta, item, tabId, pageUrl, pageTitle }
     mime: (meta && meta.mime) || null,
     size: (meta && meta.size) || (item && (item.fileSize || item.totalBytes)) || null,
     method: (meta && meta.method) || "GET",
-    referer: (meta && meta.referer) || pageUrl || (item && item.referrer) || null,
+    referer: (meta && meta.frameUrl) || (meta && meta.referer) || pageUrl || (item && item.referrer) || null,
     user_agent: (meta && meta.userAgent) || navigator.userAgent,
     cookie: cookies || null,
     headers,
     page_url: pageUrl || (meta && meta.pageUrl) || null,
+    frame_url: (meta && meta.frameUrl) || (candidateForFrame && candidateForFrame.frameUrl) || null,
     tab_id: typeof tabId === "number" ? tabId : (meta && meta.tabId) ?? null,
     save_dir: null,
     segments: null,
     manifest: null,
   };
 
+  const candidateForFrame = findCandidateByUrl(url);
   if (request.kind === "hls") {
     const candidate = findCandidate(request.tab_id ?? -1, url) || findCandidateByUrl(url);
     if (candidate) {

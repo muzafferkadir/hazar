@@ -571,10 +571,19 @@ async fn run_grab(app: AppHandle, state: Arc<CaptureState>, id: String, request:
             }
         }
         GrabKind::Hls => {
+            // Eklenti playlist'i tarayıcıda zaten çektiyse segment listesini kullan:
+            // token'lar tek kullanımlık olabiliyor, app manifest'i tekrar isteyince 404 alıyor.
+            let segments = request
+                .segments
+                .clone()
+                .filter(|list| !list.is_empty());
             let opts = HlsOptions {
                 manifest: request.url.clone(),
-                segments: request.segments.clone(),
-                base_url: request.page_url.clone(),
+                segments,
+                base_url: request
+                    .frame_url
+                    .clone()
+                    .or_else(|| request.page_url.clone()),
                 output: dest.clone(),
                 connections,
                 user_agent,

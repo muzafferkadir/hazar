@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core'
   import { listen } from '@tauri-apps/api/event'
-  import { save } from '@tauri-apps/plugin-dialog'
+  import { open as openFolder, save } from '@tauri-apps/plugin-dialog'
 
   interface ProbeInfo {
     requested_url: string
@@ -117,6 +117,35 @@
     appSettings = { ...appSettings, ...patch }
     appSettings = await invoke<Record<string, unknown>>('capture_settings_set', { settings: appSettings })
     note('ayarlar kaydedildi')
+  }
+
+  async function exportExtension() {
+    try {
+      const picked = await openFolder({
+        directory: true,
+        multiple: false,
+        title: 'Eklentiyi kaydetmek için klasör seç',
+      })
+      if (typeof picked !== 'string') return
+      const path = await invoke<string>('extension_export', { destDir: picked })
+      extensionDir = path
+      note(`eklenti kopyalandı: ${path}`)
+    } catch (error) {
+      note(`kopyalanamadı: ${error}`)
+    }
+  }
+
+  /** Ham motor hatalarını kullanıcıya anlaşılır cümleye çevirir. */
+  function humanize(message: string) {
+    if (/404/.test(message) && /\.m3u8|\.mpd/.test(message)) {
+      return 'stream bağlantısının süresi dolmuş (oynatıcı token\'ı) — tarayıcıda videoyu yeniden başlatıp tekrar gönder'
+    }
+    if (/not an HLS playlist/.test(message)) {
+      return 'stream tarayıcıda şifreli çözülüyor (client-side) — indirilemiyor'
+    }
+    if (/SAMPLE-AES|widevine|playready/i.test(message)) return 'DRM korumalı — indirilemiyor'
+    if (/timed out|timeout/i.test(message)) return `zaman aşımı: ${message}`
+    return message
   }
 
   async function revealExtension() {
@@ -357,8 +386,9 @@
         <p class="field-hint">
           Store'da yayınlanmıyor; eklenti klasörü uygulamayla birlikte gelir:
         </p>
-        <p class="path">{extensionDir ?? 'bulunamadı'}</p>
+        <p class="path selectable">{extensionDir ?? 'bulunamadı'}</p>
         <div class="button-group">
+          <button class="browse-btn primary" onclick={exportExtension}>Extension'ı indir…</button>
           <button class="browse-btn" onclick={revealExtension} disabled={!extensionDir}>Klasörü göster</button>
           <button class="browse-btn" onclick={copyExtensionPath} disabled={!extensionDir}>Yolu kopyala</button>
         </div>
@@ -424,7 +454,7 @@
               </div>
               <p class="field-hint">
                 {entry.state}{entry.total > 0 ? ` · ${human(entry.written)} / ${human(entry.total)}` : ''}
-                {#if entry.error} · {entry.error}{/if}
+                {#if entry.error} · {humanize(entry.error)}{/if}
               </p>
             </div>
             {#if entry.state === 'downloading' || entry.state === 'queued'}
@@ -474,6 +504,12 @@
     color: var(--text-2);
     white-space: pre-wrap;
     word-break: break-all;
+  }
+
+  .path.selectable {
+    user-select: text;
+    -webkit-user-select: text;
+    cursor: text;
   }
 
   .path {

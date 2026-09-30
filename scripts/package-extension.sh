@@ -16,6 +16,15 @@ OUT="$OUT_DIR/hazar-extension-v${VERSION}.zip"
 mkdir -p "$OUT_DIR"
 rm -f "$OUT"
 
+# Eklenti sürümünü app sürümüyle aynı tut (kullanıcı popup'ta tutarlı sürüm görsün).
+node -e "
+  const fs = require('fs');
+  const path = '$ROOT/extension/manifest.json';
+  const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+  manifest.version = '$VERSION';
+  fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n');
+"
+
 cd "$ROOT/extension"
 # manifest.json zip'in kökünde olmalı (tarayıcılar bunu bekler).
 zip -q -r "$OUT" . \

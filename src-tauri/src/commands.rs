@@ -140,6 +140,41 @@ pub fn extension_path(app: AppHandle) -> Result<String, String> {
     extension_dir(&app).map(|path| path.display().to_string())
 }
 
+/// Eklenti klasörünü kullanıcının seçtiği dizine kopyalar ("indir" akışı).
+///
+/// macOS'ta yol metnini elle kopyalamak/pratik değil; kullanıcı bir klasör seçer,
+/// biz eklentiyi oraya `Hazar-extension/` olarak yazarız ve Finder'da açarız.
+#[tauri::command]
+pub fn extension_export(app: AppHandle, dest_dir: String) -> Result<String, String> {
+    let source = extension_dir(&app)?;
+    let target = std::path::Path::new(&dest_dir).join("Hazar-extension");
+    if target.exists() {
+        std::fs::remove_dir_all(&target).map_err(|error| format!("eski kopya silinemedi: {error}"))?;
+    }
+    copy_dir(&source, &target)?;
+    let _ = app.opener().reveal_item_in_dir(&target);
+    Ok(target.display().to_string())
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|error| error.to_string())?;
+    for entry in std::fs::read_dir(from).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        // test klasörü ve editör artıkları kopyalanmasın.
+        if name == "test" {
+            continue;
+        }
+        let target = to.join(&name);
+        if entry.path().is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 /// Eklenti klasörünü Finder/Explorer'da açar (kullanıcı "load unpacked" yapacak).
 #[tauri::command]
 pub fn extension_reveal(app: AppHandle) -> Result<String, String> {
@@ -224,6 +259,7 @@ pub fn queue_add(
         manifest: None,
         page_url: None,
         tab_id: None,
+        frame_url: None,
         save_dir: std::path::Path::new(&dest)
             .parent()
             .map(|parent| parent.display().to_string()),
