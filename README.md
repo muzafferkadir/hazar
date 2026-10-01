@@ -46,7 +46,8 @@ Or grab the DMG / installer from [Releases](https://github.com/muzafferkadir/haz
 - 🌗 **Native feel** — macOS vibrancy, light/dark mode, menu bar mode, English and Turkish UI.
 
 <p align="center">
-  <img src="docs/screenshots/extension.png" width="720" alt="Pick a quality right on the video" />
+  <img src="docs/screenshots/extension.png" height="420" alt="Pick a quality right on the video" />
+  <img src="docs/screenshots/popup.png" height="420" alt="Extension popup" />
 </p>
 
 ## Limits
