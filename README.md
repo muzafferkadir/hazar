@@ -1,67 +1,67 @@
-# Hazar
+<p align="center">
+  <img src="docs/screenshots/logo.png" width="96" alt="Hazar logo" />
+</p>
 
-macOS ve Windows için sade download manager. Tauri 2 + Svelte 5 arayüz, Rust engine ve Chrome/Edge/Firefox extension.
+<h1 align="center">Hazar Download Manager</h1>
 
-## Kullanım
+<p align="center">
+  A fast, lightweight download manager for macOS and Windows —<br />
+  multi-connection downloads, HLS/DASH streams, and one-click video capture from your browser.
+</p>
 
-1. **URL ekle** ile formu aç; HTTP/HTTPS linkini yapıştır ve **İndir** seç.
-2. Download listesinde **Duraklat**, **Devam et** veya **Link yenile** kullan.
-3. **Ayarlar** üzerinden klasörü, eşzamanlı download sayısını ve browser capture'ı değiştir.
-4. Eklentiyi **Eklentiyi kaydet** ile dışarı çıkar; Chrome/Edge'de Extensions → Developer mode → Load unpacked ile yükle.
+<p align="center">
+  <a href="https://github.com/muzafferkadir/hazar/releases/latest"><img src="https://img.shields.io/github/v/release/muzafferkadir/hazar?color=0A5A94&label=release" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows-2A9FD6" alt="Platforms" />
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/muzafferkadir/hazar?color=061F42" alt="License" /></a>
+</p>
 
-Header sabittir; butonlar dışındaki alandan window sürüklenir. **Sil** ve **Listeyi sıfırla** queue kayıtlarını kaldırır, aktif işleri durdurur; indirilen dosyaları silmez.
+<p align="center">
+  <img src="docs/screenshots/app.png" width="720" alt="Hazar Download Manager" />
+</p>
 
-Window kapatılınca app tray/menu bar'da çalışmaya devam eder. Tray'deki Çıkış app'i kapatır. Update kontrolü Ayarlar içindedir.
+## Install
 
-## Destek
+**macOS**
 
-- yt-dlp session/network: fresh browser context, origin-scoped özel header, selected-frame partition cookie, explicit proxy/source IP, site bazlı impersonation ve paketli bgutil/Deno PO token provider.
-- yt-dlp alternatif video download: extension içinde kırmızı ve etiketli ayrı seçenek, gerçek metadata probe, browser cookie jar + Referer/User-Agent aktarımı. Normal Hazar adayları korunur; otomatik fallback yok.
-- YouTube video linkleri: paketlenen yt-dlp + Deno + FFmpeg; watch/embed/shorts/live/youtu.be URL normalizasyonu. Video/audio track kontrolü sonrası MP4 yayınlanır. Gerekli cookie extension üzerinden alınır; ek PO token/anti-bot gereksiniminde açık hata; browser cookie DB erişimi veya HTML fallback yok.
+```bash
+curl -fsSL https://raw.githubusercontent.com/muzafferkadir/hazar/main/install.sh | bash
+```
 
-- HTTP(S): bounded range work queue, connection pool, If-Range, Content-Range kontrolü, retry, sidecar resume ve opsiyonel SHA-256.
-- Worker tamamlanan aralığın ardından sıradaki aralığı alır; aktif HTTP aralıkları download sırasında kesilmez.
-- HLS VOD: captured manifest body, master seçimi, AES-128, init segment, BYTERANGE ve ayrı audio track.
-- Static DASH: typed XML, template inheritance, Number/Time templates, timeline, SegmentList ve separate audio/video.
-- Separate tracks, paketlenen FFmpeg ile re-encode olmadan mux edilir. Kaynak/lisans bilgileri app resource'larında bulunur.
-- Player üstünde **Hazar ile indir** paneli; frame bazlı tespit, HLS kalite menüsü, DOM subtitle linkleri, scroll/resize/fullscreen takibi.
-- Browser HLS capture: ayrı audio rendition korunur; iki track FFmpeg ile mux edildikten sonra done olur. AES-128, init segment ve BYTERANGE browser capture planında korunur.
-- Browser capture: downloads/webRequest/DOM/page hook; cookie/Referer/header aktarımı; frame fetch fallback için disk ACK.
-- Queue/settings app data klasöründe `downloads.json` içine kaydedilir. Restart sonrası yarım işler otomatik başlamaz; Devam et ile başlatılır.
-- Cookie/Authorization disk state'e yazılmaz. Restart sonrası oturum isteyen kaynak tarayıcıdan yeniden gönderilmelidir.
+**Windows** (PowerShell)
 
-## Sınırlar
+```powershell
+irm https://raw.githubusercontent.com/muzafferkadir/hazar/main/install.ps1 | iex
+```
 
-- DRM, POST/PUT replay, live recording ve multi-Period DASH yok.
-- HLS URL listesi fallback'i manifest metadata'sı yoksa AES/range bilgilerini yeniden oluşturamaz. Manifest body tercih edilir.
-- Browser frame fetch URL'yi tekrar request eder; gerçek tek kullanımlık segment URL'leri başarı garantisi taşımaz.
-- App kapalıyken download yok. Native messaging ve extension store yayını yok; extension unpacked dağıtılır.
-- macOS paket ad-hoc imzalıdır; Developer ID/notarization ve Windows code signing bu release'in kapsamında değildir.
-- UI tek queue kullanır. Ek kategori, site spider, protocol sürücüsü veya extractor motoru yok.
+Or grab the DMG / installer from [Releases](https://github.com/muzafferkadir/hazar/releases/latest).
 
-## Geliştirme
+**Browser extension**: in the app open **Settings → Save extension**, then in Chrome/Edge go to `chrome://extensions` → enable *Developer mode* → **Load unpacked** and pick the saved folder.
+
+## Features
+
+- ⚡ **Multi-connection downloads** — segmented HTTP(S) with resume, retries and optional SHA-256 check.
+- 🎬 **Streams** — HLS (AES-128, separate audio) and DASH, merged to MP4 with bundled FFmpeg. No re-encode.
+- ▶️ **YouTube & 1000+ sites** — bundled yt-dlp; pick the quality (2160p … 144p) right on the video.
+- 🧩 **Browser capture** — a small Hazar button on every video, context menu, and automatic download takeover with cookies/referer.
+- 🌗 **Native feel** — macOS vibrancy, light/dark mode, menu bar mode, English and Turkish UI.
+
+<p align="center">
+  <img src="docs/screenshots/extension.png" width="720" alt="Pick a quality right on the video" />
+</p>
+
+## Limits
+
+No DRM, live recording or multi-period DASH. The extension is distributed unpacked (no store release yet). macOS builds are ad-hoc signed.
+
+## Development
 
 ```bash
 pnpm install
-cargo test --workspace
-pnpm check && pnpm build
-pnpm check:extension && pnpm test:extension
-cargo run -p hazar-testmatrix
+pnpm tauri dev                     # run the app
+cargo test --workspace             # engine tests
+pnpm check && pnpm check:extension && pnpm test:extension
 ```
 
-Medya regression testi FFmpeg ister. Release binary'sini hazırlamak için `node scripts/package-media.mjs` kullanılır. Uygulamayı kullanıcı başlatır: `pnpm tauri dev`.
+Release: `bash scripts/bump-version.sh <version>`, commit, then push a `v<version>` tag — CI builds the macOS DMG, Windows installer, updater files and extension zip.
 
-## Release
-
-```bash
-bash scripts/bump-version.sh 0.2.0
-node scripts/package-media.mjs
-bash scripts/package-extension.sh
-# Değişiklikleri commit/push yaptıktan sonra:
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-Tag workflow macOS universal DMG ve Windows installer/update artifact'larını üretir. Engine/localapi/media testleri ve frontend/extension kontrolleri packaging öncesi çalışır. Updater signing key GitHub Secrets'tadır; repoya yazılmaz.
-
-IDM karşılaştırması: [docs/IDM-GAP-ANALYSIS.md](docs/IDM-GAP-ANALYSIS.md).
+[Changelog](CHANGELOG.md) · [License](LICENSE)

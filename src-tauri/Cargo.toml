@@ -2,7 +2,7 @@
 # Paket adı CLI binary'siyle (`hazar`) çakışmasın diye `hazar-app`.
 name = "hazar-app"
 version = "0.3.0"
-description = "Hazar — multi-connection download manager"
+description = "Hazar Download Manager — fast multi-connection downloader for macOS and Windows"
 authors = ["Muzaffer Kadir Yılmaz"]
 edition = "2021"
 
