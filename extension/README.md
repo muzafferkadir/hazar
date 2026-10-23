@@ -110,8 +110,7 @@ stream'i client-side şifreli demektir (indirme kapsam dışı).
 
 # Teknik notlar (geliştirici)
 
-Protokol, yakalama yolları ve testler aşağıda. (Ayrıntılı test planı:
-`../docs/CAPTURE-TESTPLAN.md`)
+Protokol, yakalama yolları ve testler aşağıda.
 
 ## Yakalama yolları
 
