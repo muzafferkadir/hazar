@@ -12,6 +12,6 @@ pub mod server;
 
 pub use protocol::{
     Bytes, Grab, GrabKind, GrabRequest, Hello, Inbound, MediaCandidate, MediaCandidates, Outbound,
-    Ping, QueueItem, Settings, SUBPROTOCOL,
+    Ping, Settings, SUBPROTOCOL,
 };
 pub use server::{ApiError, ClientMessage, LocalApiConfig, ServerHandle, EXTENSION_ID};

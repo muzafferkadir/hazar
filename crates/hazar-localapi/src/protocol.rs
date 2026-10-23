@@ -237,9 +237,6 @@ pub enum Outbound {
         id: String,
         reason: String,
     },
-    Queue {
-        items: Vec<QueueItem>,
-    },
     /// Updated settings, pushed after the user changes them in the app.
     Settings {
         settings: Settings,
@@ -304,17 +301,4 @@ impl Default for Settings {
             language: default_language(),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QueueItem {
-    pub id: String,
-    pub url: String,
-    pub state: String,
-    pub written: u64,
-    pub total: u64,
-    #[serde(default)]
-    pub path: Option<String>,
-    #[serde(default)]
-    pub error: Option<String>,
 }

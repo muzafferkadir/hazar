@@ -249,30 +249,6 @@ impl CaptureState {
         });
     }
 
-    /// Drop every waiting and running job.
-    pub fn cancel_all(&self) -> usize {
-        let dropped = {
-            let mut pending = self.pending.lock().expect("pending");
-            let count = pending.len();
-            pending.clear();
-            count
-        };
-        let running = {
-            let flags = self.cancels.lock().expect("cancel lock");
-            for flag in flags.values() {
-                flag.store(true, Ordering::Relaxed);
-            }
-            flags.len()
-        };
-        for entry in self.queue() {
-            if entry.state == "queued" || entry.state == "scheduled" || entry.state == "downloading"
-            {
-                self.update(&entry.id, |entry| entry.state = "cancelled".into());
-            }
-        }
-        dropped + running
-    }
-
     pub fn set_settings(&self, settings: Settings) -> Result<(), String> {
         *self.settings.lock().expect("settings lock") = settings;
         self.persist()

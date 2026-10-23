@@ -37,12 +37,6 @@ fn extension_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .ok_or_else(|| "extension klasörü bulunamadı".to_string())
 }
 
-/// Eklenti klasörünün tam yolu (UI'da gösterilir).
-#[tauri::command]
-pub fn extension_path(app: AppHandle) -> Result<String, String> {
-    extension_dir(&app).map(|path| path.display().to_string())
-}
-
 /// Eklenti klasörünü kullanıcının seçtiği dizine kopyalar ("indir" akışı).
 ///
 /// macOS'ta yol metnini elle kopyalamak/pratik değil; kullanıcı bir klasör seçer,
@@ -79,16 +73,6 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> 
     Ok(())
 }
 
-/// Eklenti klasörünü Finder/Explorer'da açar (kullanıcı "load unpacked" yapacak).
-#[tauri::command]
-pub fn extension_reveal(app: AppHandle) -> Result<String, String> {
-    let dir = extension_dir(&app)?;
-    app.opener()
-        .reveal_item_in_dir(&dir)
-        .map_err(|error| format!("klasör açılamadı: {error}"))?;
-    Ok(dir.display().to_string())
-}
-
 /// Capture/bridge status: where the extension should connect, and what it sent.
 #[tauri::command]
 pub fn capture_status(state: State<'_, Arc<CaptureState>>) -> StatusDto {
@@ -98,18 +82,6 @@ pub fn capture_status(state: State<'_, Arc<CaptureState>>) -> StatusDto {
 #[tauri::command]
 pub fn capture_queue(state: State<'_, Arc<CaptureState>>) -> Vec<QueueEntry> {
     state.queue()
-}
-
-#[tauri::command]
-pub fn capture_cancel(state: State<'_, Arc<CaptureState>>, id: String) -> bool {
-    let changed = state.cancel(&id) || state.inner().drop_pending(&id);
-    let _ = state.persist();
-    changed
-}
-
-#[tauri::command]
-pub fn capture_cancel_all(state: State<'_, Arc<CaptureState>>) -> usize {
-    state.cancel_all()
 }
 
 #[tauri::command]
@@ -133,9 +105,6 @@ pub fn queue_add(
     app: AppHandle,
     state: State<'_, Arc<CaptureState>>,
     url: String,
-    connections: Option<usize>,
-    sha256: Option<String>,
-    speed_limit_mbps: Option<f64>,
 ) -> String {
     let kind = if hazar_engine::is_hls(&url, None) {
         hazar_localapi::GrabKind::Hls
@@ -144,9 +113,6 @@ pub fn queue_add(
     } else {
         hazar_localapi::GrabKind::File
     };
-    let speed_limit_bps = speed_limit_mbps
-        .filter(|value| *value > 0.0)
-        .map(|value| (value * 1024.0 * 1024.0) as u64);
     let request = hazar_localapi::GrabRequest {
         max_height: None,
         url: url.clone(),
@@ -167,9 +133,9 @@ pub fn queue_add(
         page_url: None,
         tab_id: None,
         frame_url: None,
-        connections: connections.map(|value| value as u32),
-        expected_sha256: sha256.filter(|value| !value.trim().is_empty()),
-        speed_limit_bps,
+        connections: None,
+        expected_sha256: None,
+        speed_limit_bps: None,
     };
     let id = format!("app-{}", crate::bridge::CaptureState::new_job_id());
     crate::bridge::enqueue(state.inner(), &app, id.clone(), request, "app");

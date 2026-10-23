@@ -82,8 +82,6 @@ pub fn run() {
             commands::engine_version,
             commands::capture_status,
             commands::capture_queue,
-            commands::capture_cancel,
-            commands::capture_cancel_all,
             commands::capture_settings_get,
             commands::capture_settings_set,
             commands::queue_add,
@@ -91,8 +89,6 @@ pub fn run() {
             commands::queue_resume,
             commands::queue_remove,
             commands::queue_clear,
-            commands::extension_path,
-            commands::extension_reveal,
             commands::extension_export
         ])
         .build(tauri::generate_context!())

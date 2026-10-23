@@ -145,7 +145,7 @@ WebSocket: `ws://127.0.0.1:8722` (8722–8730 arası denenir), subprotocol `haza
 ```
 
 Uygulama → eklenti: `hello_ok`, `hello_err`, `grab_ack`, `progress`, `finished`,
-`failed`, `queue`, `settings`, `pong`, `error`.
+`failed`, `extracted`, `refresh_context`, `bytes_ack`, `settings`, `pong`, `error`.
 
 Kimlik doğrulama: yalnız loopback + zorunlu subprotocol + `hello` + bağlantıya özel
 session token + Origin kontrolü. Chrome/Edge'de yalnız Hazar eklentisi kabul edilir:
