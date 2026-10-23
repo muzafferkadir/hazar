@@ -2,6 +2,8 @@
 //!
 //! - WebSocket only, bound to `127.0.0.1`, port 8722 (falls through to 8730).
 //! - Sub-protocol handshake: [`protocol::SUBPROTOCOL`] must be requested.
+//! - Origin must be the Hazar extension ([`server::EXTENSION_ID`] on Chromium, any
+//!   `moz-extension://` on Firefox); web pages and origin-less clients are refused.
 //! - First message must be [`protocol::Inbound::Hello`]; a per-connection
 //!   session token comes back in [`protocol::Outbound::HelloOk`].
 
@@ -12,4 +14,4 @@ pub use protocol::{
     Bytes, Grab, GrabKind, GrabRequest, Hello, Inbound, MediaCandidate, MediaCandidates, Outbound,
     Ping, QueueItem, Settings, SUBPROTOCOL,
 };
-pub use server::{ApiError, ClientMessage, LocalApiConfig, ServerHandle};
+pub use server::{ApiError, ClientMessage, LocalApiConfig, ServerHandle, EXTENSION_ID};

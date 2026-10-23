@@ -16,6 +16,9 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::protocol::{Hello, Inbound, Outbound, Settings, SUBPROTOCOL};
 
+/// Chrome/Edge id of the Hazar extension, fixed by the `key` in `extension/manifest.json`.
+pub const EXTENSION_ID: &str = "oclkmglhbgebcpfcellnajdjhfbgikih";
+
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
     #[error("io error: {0}")]
@@ -191,17 +194,13 @@ async fn handle_connection(
     let callback = |req: &Request,
                     mut resp: Response|
      -> std::result::Result<Response, ErrorResponse> {
-        if let Some(origin) = req.headers().get("origin") {
-            let origin = origin.to_str().unwrap_or("");
-            if !(origin.starts_with("chrome-extension://")
-                || origin.starts_with("moz-extension://"))
-            {
-                let mut error = ErrorResponse::new(Some("extension origin required".into()));
-                *error.status_mut() = StatusCode::FORBIDDEN;
-                return Err(error);
-            }
+        let request_origin = req.headers().get("origin").and_then(|v| v.to_str().ok()).unwrap_or("");
+        if !origin_allowed(request_origin) {
+            let mut error = ErrorResponse::new(Some("Hazar extension origin required".into()));
+            *error.status_mut() = StatusCode::FORBIDDEN;
+            return Err(error);
         }
-        *origin.lock().expect("origin") = req.headers().get("origin").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        *origin.lock().expect("origin") = request_origin.to_string();
         let offered = req
             .headers()
             .get("sec-websocket-protocol")
@@ -281,7 +280,7 @@ async fn handle_connection(
         return Ok(());
     }
 
-    let identity = { let origin = origin.lock().expect("origin"); if origin.is_empty() { format!("native-{client_id}") } else { origin.clone() } };
+    let identity = origin.lock().expect("origin").clone();
     let session = session_token(client_id)?;
     send(
         &mut sink,
@@ -394,6 +393,11 @@ async fn send(
     let json = serde_json::to_string(message)?;
     sink.send(Message::text(json)).await?;
     Ok(())
+}
+
+fn origin_allowed(origin: &str) -> bool {
+    // Firefox gives each install a random moz-extension UUID, so it cannot be pinned.
+    origin.strip_prefix("chrome-extension://") == Some(EXTENSION_ID) || origin.starts_with("moz-extension://")
 }
 
 fn session_token(_client_id: u64) -> Result<String> {

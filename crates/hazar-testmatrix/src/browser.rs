@@ -99,30 +99,9 @@ fn extension_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extension")
 }
 
-/// Chrome derives an unpacked extension's id from sha256 of its absolute path,
-/// mapping the first 16 bytes' nibbles to `a..p`. Knowing it lets us attach to
-/// **our** service worker instead of whichever extension Chrome starts first.
-fn extension_id() -> String {
-    use sha2::{Digest, Sha256};
-    let path = extension_dir();
-    let path = std::fs::canonicalize(&path).unwrap_or(path);
-    let mut hasher = Sha256::new();
-    hasher.update(path.to_string_lossy().as_bytes());
-    hasher
-        .finalize()
-        .iter()
-        .take(16)
-        .map(|byte| {
-            let high = b'a' + (byte >> 4);
-            let low = b'a' + (byte & 0x0f);
-            format!("{}{}", high as char, low as char)
-        })
-        .collect()
-}
-
-/// True for our extension's MV3 service worker target.
+/// True for our extension's MV3 service worker target (the manifest `key` pins its id).
 fn is_hazar_worker(url: &str) -> bool {
-    let expected = format!("chrome-extension://{}/src/background.js", extension_id());
+    let expected = format!("chrome-extension://{}/src/background.js", hazar_localapi::EXTENSION_ID);
     url == expected || url.ends_with("/src/background.js")
 }
 

@@ -23,7 +23,8 @@ let session = null;
 let phase = 'hello';
 const finished = new Map();
 
-const ws = new WebSocket(APP, 'hazar.v1');
+// The bridge only accepts the Hazar extension origin (manifest key pins the id).
+const ws = new WebSocket(APP, { protocols: ['hazar.v1'], headers: { Origin: 'chrome-extension://oclkmglhbgebcpfcellnajdjhfbgikih' } });
 const startedAt = Date.now();
 const stamp = () => `[${((Date.now() - startedAt) / 1000).toFixed(1)}s]`;
 

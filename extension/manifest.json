@@ -5,6 +5,7 @@
   "version": "0.3.0",
   "author": "Muzaffer Kadir Yılmaz",
   "minimum_chrome_version": "109",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwdiBr2m0ZaoTpI9EnI186cLPRO7/CWBxq1K/R0X59gBacNBxYvQNshhRv0eY5p5jqnL+mEHUrDkei2gMjF0HjQp5uhh0MqZdk6xEYXR4qMVZOkggHLXpnUJF3CRXDPKuQlPtg8WTxAKPgFE/oZChmTOe5N6Nk9KNcEuxKYrPDJoFTnj15CYUrPK6LpSRU7XHBkAQj+f7ZHMTVg6eMi/jL/FkG1vv/ezWpp8yzRdB+GNRNvxou5RdFPXmP2eZPtGBx6psnpho02xrRg41KBnuxH7TsBh0dUcR7qvxoGMkVeSmDLhTWHL4cYs+OqptbUBcJfNrfesXOxKe0aG8LrYa3QIDAQAB",
   "action": {
     "default_title": "Hazar Download Manager",
     "default_popup": "src/popup.html",

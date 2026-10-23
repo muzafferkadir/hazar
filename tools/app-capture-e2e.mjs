@@ -24,7 +24,8 @@ const expected = Buffer.concat(parts);
 const expectedHash = createHash('sha256').update(expected).digest('hex');
 const filename = 'capture-e2e.ts';
 
-const ws = new WebSocket(APP, 'hazar.v1');
+// The bridge only accepts the Hazar extension origin (manifest key pins the id).
+const ws = new WebSocket(APP, { protocols: ['hazar.v1'], headers: { Origin: 'chrome-extension://oclkmglhbgebcpfcellnajdjhfbgikih' } });
 let session = null;
 const messages = [];
 

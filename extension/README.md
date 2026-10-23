@@ -148,7 +148,13 @@ Uygulama → eklenti: `hello_ok`, `hello_err`, `grab_ack`, `progress`, `finished
 `failed`, `queue`, `settings`, `pong`, `error`.
 
 Kimlik doğrulama: yalnız loopback + zorunlu subprotocol + `hello` + bağlantıya özel
-session token.
+session token + Origin kontrolü. Chrome/Edge'de yalnız Hazar eklentisi kabul edilir:
+`manifest.json` içindeki `key` eklenti kimliğini klasör yolundan bağımsız olarak
+`oclkmglhbgebcpfcellnajdjhfbgikih` yapar ve app yalnız
+`chrome-extension://oclkmglhbgebcpfcellnajdjhfbgikih` origin'ine izin verir
+(`crates/hazar-localapi/src/server.rs` → `EXTENSION_ID`). Firefox her kurulumda rastgele
+bir `moz-extension://` UUID'si verdiği için Firefox'ta herhangi bir eklenti origin'i kabul edilir.
+Web sayfaları ve Origin göndermeyen istemciler reddedilir.
 
 ## Geliştirme / test
 

@@ -20,3 +20,5 @@ url = { workspace = true }
 
 [dev-dependencies]
 tokio-tungstenite = { workspace = true }
+sha2 = { workspace = true }
+base64 = "0.22"

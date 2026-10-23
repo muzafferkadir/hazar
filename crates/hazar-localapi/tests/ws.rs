@@ -1,7 +1,7 @@
 //! Loopback API: handshake rules, message round-trip and port fallback.
 
 use futures_util::{SinkExt, StreamExt};
-use hazar_localapi::{Inbound, LocalApiConfig, Outbound, SUBPROTOCOL};
+use hazar_localapi::{Inbound, LocalApiConfig, Outbound, EXTENSION_ID, SUBPROTOCOL};
 use serde::de::DeserializeOwned;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
@@ -11,12 +11,19 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 type Ws = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
 async fn connect(port: u16, subprotocol: bool) -> Result<Ws, String> {
+    connect_from(port, subprotocol, Some(&format!("chrome-extension://{EXTENSION_ID}"))).await
+}
+
+async fn connect_from(port: u16, subprotocol: bool, origin: Option<&str>) -> Result<Ws, String> {
     let url = format!("ws://127.0.0.1:{port}/hazar");
     let mut request = url.into_client_request().map_err(|e| e.to_string())?;
     if subprotocol {
         request
             .headers_mut()
             .insert("Sec-WebSocket-Protocol", HeaderValue::from_static(SUBPROTOCOL));
+    }
+    if let Some(origin) = origin {
+        request.headers_mut().insert("Origin", HeaderValue::from_str(origin).map_err(|e| e.to_string())?);
     }
     connect_async(request)
         .await
@@ -207,10 +214,7 @@ async fn falls_back_to_the_next_free_port() {
 #[tokio::test]
 async fn refuses_web_page_origin_and_missing_session() {
     let (handle, mut inbound) = hazar_localapi::server::start(LocalApiConfig { ports: vec![0], ..Default::default() }).await.unwrap();
-    let mut request = format!("ws://127.0.0.1:{}/hazar", handle.port).into_client_request().unwrap();
-    request.headers_mut().insert("Sec-WebSocket-Protocol", HeaderValue::from_static(SUBPROTOCOL));
-    request.headers_mut().insert("Origin", HeaderValue::from_static("https://attacker.example"));
-    assert!(connect_async(request).await.is_err());
+    assert!(connect_from(handle.port, true, Some("https://attacker.example")).await.is_err());
     let mut ws = connect(handle.port, true).await.unwrap();
     send(&mut ws, &serde_json::json!({"type":"hello", "protocol":1, "client":"test"})).await;
     let _: Outbound = recv(&mut ws).await;
@@ -218,4 +222,25 @@ async fn refuses_web_page_origin_and_missing_session() {
     assert!(matches!(recv::<Outbound>(&mut ws).await, Outbound::Error { .. }));
     assert!(inbound.try_recv().is_err());
     handle.shutdown();
+}
+
+#[tokio::test]
+async fn accepts_only_the_hazar_extension_origin() {
+    let (handle, _inbound) = hazar_localapi::server::start(LocalApiConfig { ports: vec![0], ..Default::default() }).await.unwrap();
+    assert!(connect_from(handle.port, true, None).await.is_err(), "origin-less client accepted");
+    assert!(connect_from(handle.port, true, Some("chrome-extension://abcdefghijklmnopabcdefghijklmnop")).await.is_err(), "other extension accepted");
+    assert!(connect_from(handle.port, true, Some("moz-extension://8f1c2d3e-0000-4000-8000-000000000000")).await.is_ok(), "firefox extension refused");
+    assert!(connect(handle.port, true).await.is_ok(), "hazar extension refused");
+    handle.shutdown();
+}
+
+#[test]
+fn extension_id_matches_the_manifest_key() {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let manifest: serde_json::Value = serde_json::from_str(include_str!("../../../extension/manifest.json")).unwrap();
+    let key = base64::engine::general_purpose::STANDARD.decode(manifest["key"].as_str().expect("manifest key")).unwrap();
+    // Chromium maps the first 16 bytes of sha256(public key) to the letters a..p.
+    let id: String = Sha256::digest(key)[..16].iter().flat_map(|byte| [byte >> 4, byte & 0x0f]).map(|nibble| (b'a' + nibble) as char).collect();
+    assert_eq!(id, EXTENSION_ID);
 }

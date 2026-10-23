@@ -8,12 +8,20 @@
  * Requires: cargo (builds crates/hazar-localapi/examples/echo_server.rs).
  */
 const assert = require("assert");
+const crypto = require("crypto");
 const path = require("path");
 const { spawn } = require("child_process");
 
 require("../src/lib.js");
 const Lib = globalThis.HazarLib;
 const ROOT = path.join(__dirname, "..", "..");
+
+// Chromium derives the extension id from the manifest key: sha256, first 16 bytes, nibbles as a..p.
+const manifestKey = Buffer.from(require("../manifest.json").key, "base64");
+const extensionId = [...crypto.createHash("sha256").update(manifestKey).digest().subarray(0, 16)]
+  .map((byte) => String.fromCharCode(97 + (byte >> 4), 97 + (byte & 15)))
+  .join("");
+const HAZAR_ORIGIN = `chrome-extension://${extensionId}`;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -56,9 +64,9 @@ function startApp() {
   return { child, ready, grab, lines, port: () => port };
 }
 
-function connect(port, subprotocol) {
+function connect(port, subprotocol, origin = HAZAR_ORIGIN) {
   const url = `ws://127.0.0.1:${port}/hazar`;
-  const socket = subprotocol ? new WebSocket(url, subprotocol) : new WebSocket(url);
+  const socket = new WebSocket(url, { protocols: subprotocol ? [subprotocol] : [], headers: origin ? { Origin: origin } : {} });
   const inbox = [];
   let waiter = null;
 
@@ -205,15 +213,22 @@ async function step(name, fn) {
     client.socket.close();
   });
 
-  await step("connections without the hazar.v1 subprotocol are refused", async () => {
-    const client = connect(app.port(), null);
-    let refused = false;
+  const refused = async (client) => {
     try {
       await client.open;
+      return false;
     } catch (_) {
-      refused = true;
+      return true;
     }
-    assert.ok(refused, "connection without subprotocol was accepted");
+  };
+
+  await step("connections without the hazar.v1 subprotocol are refused", async () => {
+    assert.ok(await refused(connect(app.port(), null)), "connection without subprotocol was accepted");
+  });
+
+  await step("other extensions and origin-less clients are refused", async () => {
+    assert.ok(await refused(connect(app.port(), "hazar.v1", "chrome-extension://abcdefghijklmnopabcdefghijklmnop")), "other extension was accepted");
+    assert.ok(await refused(connect(app.port(), "hazar.v1", null)), "client without Origin was accepted");
   });
 
   await wait(200);
