@@ -51,7 +51,7 @@ ws.addEventListener('message', (event) => {
     console.log(`${stamp()} hello_ok: app ${message.app} ${message.version} · protocol ${message.protocol}`);
     console.log(
       `         settings: connections=${s.connections} max_concurrent=${s.max_concurrent_downloads} ` +
-        `schedule=${s.schedule_enabled}(${s.schedule_from}-${s.schedule_to}) download_dir=${s.download_dir}`,
+        `download_dir=${s.download_dir}`,
     );
     console.log(`         features: ${message.features.join(', ')}`);
 

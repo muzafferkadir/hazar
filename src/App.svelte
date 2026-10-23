@@ -10,7 +10,7 @@
   import { locales, type Lang } from './locales'
 
   type Job = { id: string; url: string; filename: string | null; state: string; written: number; total: number; path: string | null; error: string | null }
-  type Settings = { download_dir: string | null; connections: number; max_concurrent_downloads: number; capture_enabled: boolean; min_size_bytes: number; excluded_hosts: string[]; schedule_enabled: boolean; schedule_from: string; schedule_to: string; language: string }
+  type Settings = { download_dir: string | null; connections: number; max_concurrent_downloads: number; capture_enabled: boolean; min_size_bytes: number; excluded_hosts: string[]; language: string }
   type Status = { extensionClients: number; downloadDir: string }
   let jobs = $state<Job[]>([])
   let settings = $state<Settings | null>(null)
@@ -27,7 +27,7 @@
   const lang = $derived<Lang>(settings && settings.language in locales ? settings.language as Lang : 'en')
   const t = $derived(locales[lang].messages)
   $effect(() => { document.documentElement.lang = lang })
-  const active = (job: Job) => ['queued', 'scheduled', 'downloading'].includes(job.state)
+  const active = (job: Job) => ['queued', 'downloading'].includes(job.state)
   const resumable = (job: Job) => ['paused', 'interrupted', 'cancelled', 'failed', 'needs_refresh'].includes(job.state)
   const size = (value: number) => {
     const units = ['B', 'KB', 'MB', 'GB']; let index = 0

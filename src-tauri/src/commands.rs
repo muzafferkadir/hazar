@@ -91,11 +91,14 @@ pub fn capture_settings_get(state: State<'_, Arc<CaptureState>>) -> hazar_locala
 
 #[tauri::command]
 pub fn capture_settings_set(
+    app: AppHandle,
     state: State<'_, Arc<CaptureState>>,
     settings: hazar_localapi::Settings,
 ) -> Result<hazar_localapi::Settings, String> {
     state.set_settings(settings.clone())?;
     state.inner().publish_settings(&settings);
+    // A higher concurrency limit starts waiting jobs right away.
+    crate::bridge::pump(state.inner(), &app);
     Ok(state.settings())
 }
 

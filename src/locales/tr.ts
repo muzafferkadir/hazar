@@ -39,5 +39,5 @@ export default {
   cancel: 'Vazgeç',
   browserConnected: 'Tarayıcı bağlı',
   browserNotConnected: 'Tarayıcı bağlı değil',
-  states: { queued: 'Bekliyor', scheduled: 'Zamanlandı', downloading: 'İndiriliyor', assembling: 'Birleştiriliyor', paused: 'Duraklatıldı', interrupted: 'Yarım kaldı', cancelled: 'İptal edildi', cancelling: 'Durduruluyor', failed: 'Başarısız', done: 'Tamamlandı', needs_refresh: 'Yeni link gerekli' } as Record<string, string>,
+  states: { queued: 'Bekliyor', downloading: 'İndiriliyor', assembling: 'Birleştiriliyor', paused: 'Duraklatıldı', interrupted: 'Yarım kaldı', cancelled: 'İptal edildi', cancelling: 'Durduruluyor', failed: 'Başarısız', done: 'Tamamlandı', needs_refresh: 'Yeni link gerekli' } as Record<string, string>,
 } satisfies typeof en

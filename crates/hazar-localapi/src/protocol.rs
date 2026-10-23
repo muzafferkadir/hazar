@@ -262,13 +262,6 @@ pub struct Settings {
     pub capture_enabled: bool,
     pub min_size_bytes: u64,
     pub excluded_hosts: Vec<String>,
-    /// Gece indirme penceresi (yerel saat, "HH:MM"); kapalıysa hep indirir.
-    #[serde(default)]
-    pub schedule_enabled: bool,
-    #[serde(default = "default_schedule_from")]
-    pub schedule_from: String,
-    #[serde(default = "default_schedule_to")]
-    pub schedule_to: String,
     /// UI dili (app + extension); src/locales ve extension/src/locales kodları.
     #[serde(default = "default_language")]
     pub language: String,
@@ -276,14 +269,6 @@ pub struct Settings {
 
 fn default_language() -> String {
     "en".to_string()
-}
-
-fn default_schedule_from() -> String {
-    "02:00".to_string()
-}
-
-fn default_schedule_to() -> String {
-    "08:00".to_string()
 }
 
 impl Default for Settings {
@@ -295,9 +280,6 @@ impl Default for Settings {
             capture_enabled: true,
             min_size_bytes: 512 * 1024,
             excluded_hosts: Vec::new(),
-            schedule_enabled: false,
-            schedule_from: default_schedule_from(),
-            schedule_to: default_schedule_to(),
             language: default_language(),
         }
     }

@@ -47,7 +47,7 @@ pub struct StatusDto {
     pub download_dir: String,
 }
 
-/// A grab waiting for a free slot / for the schedule window.
+/// A grab waiting for a free slot.
 struct PendingJob {
     id: String,
     request: GrabRequest,
@@ -95,7 +95,7 @@ pub struct CaptureState {
     port: Arc<Mutex<Option<u16>>>,
     server: Arc<Mutex<Option<ServerHandle>>>,
     queue: Arc<Mutex<Queue>>,
-    /// Jobs waiting for a concurrency slot or for the schedule window.
+    /// Jobs waiting for a concurrency slot.
     pending: Arc<Mutex<VecDeque<PendingJob>>>,
     running: Arc<std::sync::atomic::AtomicUsize>,
     cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
@@ -397,7 +397,7 @@ impl CaptureState {
     }
 }
 
-/// Bir işi kuyruğa alır: boş slot ve (açıksa) zamanlama penceresi varsa hemen başlar.
+/// Bir işi kuyruğa alır: boş slot varsa hemen başlar.
 pub(crate) fn enqueue(
     state: &Arc<CaptureState>,
     app: &AppHandle,
@@ -415,7 +415,7 @@ pub(crate) fn enqueue(
     }
     if state.requests.lock().expect("requests").contains_key(&id)
         && state.queue().iter().any(|e| {
-            e.id == id && matches!(e.state.as_str(), "queued" | "scheduled" | "downloading")
+            e.id == id && matches!(e.state.as_str(), "queued" | "downloading")
         })
     {
         return;
@@ -439,7 +439,6 @@ pub(crate) fn enqueue(
         .lock()
         .expect("requests")
         .insert(id.clone(), request.clone());
-    let scheduled = !schedule_allows(&settings);
     let kind = match request.kind {
         GrabKind::File => "file",
         GrabKind::Hls => "hls",
@@ -463,7 +462,7 @@ pub(crate) fn enqueue(
         id,
         url: request.url.clone(),
         kind,
-        state: if scheduled { "scheduled" } else { "queued" }.into(),
+        state: "queued".into(),
         source: source.to_string(),
         written: 0,
         total: 0,
@@ -476,15 +475,11 @@ pub(crate) fn enqueue(
     pump(state, app);
 }
 
-/// Boş slot olduğu ve zamanlama izin verdiği sürece bekleyen işleri başlatır.
+/// Boş slot olduğu sürece bekleyen işleri başlatır.
 pub(crate) fn pump(state: &Arc<CaptureState>, app: &AppHandle) {
     let _pump_guard = state.pump_lock.lock().expect("pump");
     loop {
-        let settings = state.settings();
-        if !schedule_allows(&settings) {
-            return;
-        }
-        let max = settings.max_concurrent_downloads.max(1) as usize;
+        let max = state.settings().max_concurrent_downloads.max(1) as usize;
         if state.running.load(std::sync::atomic::Ordering::Relaxed) >= max {
             return;
         }
@@ -517,52 +512,6 @@ pub(crate) fn pump(state: &Arc<CaptureState>, app: &AppHandle) {
     }
 }
 
-/// Zamanlama kapalıysa hep açık; açıksa "from-to" penceresi (gece yarısını sarabilir).
-fn schedule_allows(settings: &Settings) -> bool {
-    if !settings.schedule_enabled {
-        return true;
-    }
-    let minutes = |value: &str| -> Option<u32> {
-        let (hours, minutes) = value.split_once(':')?;
-        Some(hours.trim().parse::<u32>().ok()? * 60 + minutes.trim().parse::<u32>().ok()?)
-    };
-    let (Some(from), Some(to)) = (
-        minutes(&settings.schedule_from),
-        minutes(&settings.schedule_to),
-    ) else {
-        return true;
-    };
-    let now = {
-        let seconds = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_secs())
-            .unwrap_or(0) as i64
-            + local_offset_seconds();
-        ((seconds.rem_euclid(86_400)) / 60) as u32
-    };
-    if from <= to {
-        now >= from && now < to
-    } else {
-        now >= from || now < to
-    }
-}
-
-/// UTC→yerel fark (saniye). Tarih/saat kütüphanesi eklemeden pratik çözüm.
-fn local_offset_seconds() -> i64 {
-    // `date +%z` çıktısını kullan (her platformda var).
-    let output = std::process::Command::new("date").arg("+%z").output();
-    let Ok(output) = output else { return 0 };
-    let text = String::from_utf8_lossy(&output.stdout);
-    let text = text.trim();
-    if text.len() < 5 {
-        return 0;
-    }
-    let sign = if text.starts_with('-') { -1 } else { 1 };
-    let hours: i64 = text[1..3].parse().unwrap_or(0);
-    let minutes: i64 = text[3..5].parse().unwrap_or(0);
-    sign * (hours * 3600 + minutes * 60)
-}
-
 /// Start the loopback API and wire it to the engine.
 pub fn start(app: AppHandle, settings: Settings) -> Arc<CaptureState> {
     let store = crate::store::Store::new(app.path().app_data_dir().expect("app data"));
@@ -577,7 +526,7 @@ pub fn start(app: AppHandle, settings: Settings) -> Arc<CaptureState> {
         for mut entry in saved.entries {
             if matches!(
                 entry.state.as_str(),
-                "downloading" | "queued" | "scheduled" | "cancelling" | "assembling"
+                "downloading" | "queued" | "cancelling" | "assembling"
             ) {
                 entry.state = "interrupted".into();
             }
@@ -615,18 +564,6 @@ pub fn start(app: AppHandle, settings: Settings) -> Arc<CaptureState> {
         removed: Mutex::new(std::collections::HashSet::new()),
         context_replies: Mutex::new(HashMap::new()),
     });
-
-    // Zamanlanmış işleri pencere açıldığında başlat.
-    {
-        let tick_state = state.clone();
-        let tick_app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(15)).await;
-                pump(&tick_state, &tick_app);
-            }
-        });
-    }
 
     let run_state = state.clone();
     let run_app = app.clone();

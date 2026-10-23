@@ -37,5 +37,5 @@ export default {
   cancel: 'Cancel',
   browserConnected: 'Browser connected',
   browserNotConnected: 'Browser not connected',
-  states: { queued: 'Queued', scheduled: 'Scheduled', downloading: 'Downloading', assembling: 'Assembling', paused: 'Paused', interrupted: 'Interrupted', cancelled: 'Cancelled', cancelling: 'Stopping', failed: 'Failed', done: 'Done', needs_refresh: 'New link needed' } as Record<string, string>,
+  states: { queued: 'Queued', downloading: 'Downloading', assembling: 'Assembling', paused: 'Paused', interrupted: 'Interrupted', cancelled: 'Cancelled', cancelling: 'Stopping', failed: 'Failed', done: 'Done', needs_refresh: 'New link needed' } as Record<string, string>,
 }
