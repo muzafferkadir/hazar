@@ -1203,9 +1203,13 @@ fn resolve_dest(request: &GrabRequest, settings: &Settings) -> PathBuf {
     candidate
 }
 
+// The platform downloads folder (FOLDERID_Downloads on Windows, where HOME is usually unset).
 pub fn default_download_dir() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    Path::new(&home).join("Downloads").display().to_string()
+    dirs::download_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join("Downloads")))
+        .unwrap_or_else(std::env::temp_dir)
+        .display()
+        .to_string()
 }
 
 fn name_from_url(url: &str) -> String {
@@ -1360,6 +1364,11 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(resolve_dest(&request, &settings).parent(), Some(dir.as_path()));
+    }
+
+    #[test]
+    fn default_download_dir_is_absolute() {
+        assert!(Path::new(&default_download_dir()).is_absolute());
     }
 
     #[test]
