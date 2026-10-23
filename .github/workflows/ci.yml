@@ -1,0 +1,56 @@
+name: CI
+
+# Tests only; releases stay in release.yml (tag push).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-14, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          # The cargo workspace lives at the repo root, not inside src-tauri.
+          workspaces: .
+
+      - run: pnpm install --frozen-lockfile
+
+      # The FFmpeg mux test uses the same pinned build as the release.
+      - name: Bundle verified FFmpeg
+        run: node scripts/package-media.mjs
+
+      - run: pnpm check
+      - run: pnpm check:extension
+      - run: pnpm test:extension
+
+      # The app crate embeds dist/ at compile time.
+      - run: pnpm build
+
+      - run: cargo test -p hazar-engine -p hazar-localapi -p hazar-testmatrix -p hazar-app
+
+      # Built first so the bridge test does not spend its timeout compiling.
+      - run: cargo build -p hazar-localapi --example echo_server
+      - run: pnpm test:bridge
