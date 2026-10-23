@@ -85,20 +85,34 @@ pub struct ClientMessage {
     pub message: Inbound,
 }
 
+/// Job id → origin of the client that started it.
+type Owners = Arc<Mutex<HashMap<String, String>>>;
+
 pub struct ServerHandle {
     pub addr: SocketAddr,
     pub port: u16,
-    outbound: broadcast::Sender<Outbound>,
+    outbound: broadcast::Sender<(Outbound, Option<String>)>,
     clients: Arc<AtomicU64>,
+    owners: Owners,
     shutdown: watch::Sender<bool>,
 }
 
 impl ServerHandle {
-    /// Send a message to every connected client.
+    /// Send a message to every connected client; job messages only reach the job's owner.
     pub fn broadcast(&self, message: Outbound) {
+        // The owner is resolved here so a finished job can release its entry right away.
+        let owner = job_id(&message).and_then(|id| {
+            let mut owners = self.owners.lock().expect("owners");
+            if matches!(message, Outbound::Finished { .. } | Outbound::Extracted { .. }) { owners.remove(id) } else { owners.get(id).cloned() }
+        });
         if self.outbound.receiver_count() > 0 {
-            let _ = self.outbound.send(message);
+            let _ = self.outbound.send((message, owner));
         }
+    }
+
+    /// Forget who owns a job (the app removed it from its list).
+    pub fn release(&self, id: &str) {
+        self.owners.lock().expect("owners").remove(id);
     }
 
     pub fn client_count(&self) -> u64 {
@@ -135,21 +149,22 @@ pub async fn start(
     let listener = listener.ok_or(ApiError::Bind(attempts))?;
     let addr = listener.local_addr()?;
 
-    let (outbound, _) = broadcast::channel::<Outbound>(512);
+    let (outbound, _) = broadcast::channel::<(Outbound, Option<String>)>(512);
     let (tx, rx) = mpsc::unbounded_channel::<ClientMessage>();
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let clients = Arc::new(AtomicU64::new(0));
     let next_id = Arc::new(AtomicU64::new(1));
+    let owners = Owners::default();
 
     let handle = ServerHandle {
         addr,
         port: addr.port(),
         outbound: outbound.clone(),
         clients: clients.clone(),
+        owners: owners.clone(),
         shutdown: shutdown_tx,
     };
 
-    let owners = Arc::new(Mutex::new(HashMap::<String, String>::new()));
     let accept_cfg = cfg.clone();
     tokio::spawn(async move {
         loop {
@@ -185,10 +200,10 @@ async fn handle_connection(
     peer: SocketAddr,
     client_id: u64,
     cfg: LocalApiConfig,
-    outbound: broadcast::Sender<Outbound>,
+    outbound: broadcast::Sender<(Outbound, Option<String>)>,
     inbound_tx: mpsc::UnboundedSender<ClientMessage>,
     clients: Arc<AtomicU64>,
-    owners: Arc<Mutex<HashMap<String, String>>>,
+    owners: Owners,
 ) -> Result<()> {
     let origin = Arc::new(Mutex::new(String::new()));
     let callback = |req: &Request,
@@ -326,7 +341,7 @@ async fn handle_connection(
                                 let job_id = match &message { Inbound::Grab(m) | Inbound::Extract(m) => Some(&m.id), Inbound::Context(m) => Some(&m.id), Inbound::Cancel(m) => Some(&m.id), Inbound::Bytes(m) => Some(&m.stream_id), Inbound::CaptureFailed(m) => Some(&m.id), _ => None };
                                 let authorized = if let Some(id) = job_id {
                                     let mut owners = owners.lock().expect("owners");
-                                    if id.is_empty() || id.len() > 128 || owners.len() >= 10000 { false }
+                                    if id.is_empty() || id.len() > 128 || (owners.len() >= 10000 && !owners.contains_key(id)) { false }
                                     else if matches!(message, Inbound::Context(_) | Inbound::Cancel(_) | Inbound::CaptureFailed(_)) { owners.get(id) == Some(&identity) }
                                     else { owners.entry(id.clone()).or_insert_with(|| identity.clone()) == &identity }
                                 } else { true };
@@ -356,16 +371,9 @@ async fn handle_connection(
             }
             outgoing = rx.recv() => {
                 match outgoing {
-                    Ok(message) => {
-                        let id = match &message {
-                            Outbound::RefreshContext { id, .. } | Outbound::Extracted { id, .. } | Outbound::GrabAck { id, .. } | Outbound::Progress { id, .. } | Outbound::Finished { id, .. } | Outbound::Failed { id, .. } => Some(id),
-                            Outbound::BytesAck { stream_id, .. } => Some(stream_id),
-                            _ => None
-                        };
-                        let deliver = id.map(|id| owners.lock().expect("owners").get(id) == Some(&identity)).unwrap_or(true);
-                        if deliver {
+                    Ok((message, owner)) => {
+                        if job_id(&message).is_none() || owner.as_deref() == Some(identity.as_str()) {
                             send(&mut sink, &message).await?;
-                            if let Outbound::Extracted { id, .. } = &message { owners.lock().expect("owners").remove(id); }
                         }
                     },
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
@@ -393,6 +401,14 @@ async fn send(
     let json = serde_json::to_string(message)?;
     sink.send(Message::text(json)).await?;
     Ok(())
+}
+
+fn job_id(message: &Outbound) -> Option<&String> {
+    match message {
+        Outbound::RefreshContext { id, .. } | Outbound::Extracted { id, .. } | Outbound::GrabAck { id, .. } | Outbound::Progress { id, .. } | Outbound::Finished { id, .. } | Outbound::Failed { id, .. } => Some(id),
+        Outbound::BytesAck { stream_id, .. } => Some(stream_id),
+        _ => None,
+    }
 }
 
 fn origin_allowed(origin: &str) -> bool {

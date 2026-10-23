@@ -244,3 +244,42 @@ fn extension_id_matches_the_manifest_key() {
     let id: String = Sha256::digest(key)[..16].iter().flat_map(|byte| [byte >> 4, byte & 0x0f]).map(|nibble| (b'a' + nibble) as char).collect();
     assert_eq!(id, EXTENSION_ID);
 }
+
+async fn hello(ws: &mut Ws) -> String {
+    send(ws, &serde_json::json!({ "type": "hello", "protocol": hazar_engine::PROTOCOL_VERSION, "client": "test" })).await;
+    match recv::<Outbound>(ws).await {
+        Outbound::HelloOk { session, .. } => session,
+        other => panic!("expected hello_ok, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn finished_and_released_jobs_free_their_owner_entry() {
+    let (handle, mut inbound) = hazar_localapi::server::start(LocalApiConfig { ports: vec![0], ..Default::default() }).await.unwrap();
+    let mut chrome = connect(handle.port, true).await.unwrap();
+    let chrome_session = hello(&mut chrome).await;
+    let mut firefox = connect_from(handle.port, true, Some("moz-extension://8f1c2d3e-0000-4000-8000-000000000000")).await.unwrap();
+    let firefox_session = hello(&mut firefox).await;
+    let grab = |session: &str, id: &str| serde_json::json!({ "type": "grab", "session": session, "id": id, "request": { "url": "https://cdn.example.com/a.bin", "kind": "file" } });
+
+    for id in ["done-job", "removed-job"] {
+        send(&mut chrome, &grab(&chrome_session, id)).await;
+        assert!(matches!(inbound.recv().await.unwrap().message, Inbound::Grab(_)));
+        send(&mut firefox, &grab(&firefox_session, id)).await;
+        assert!(matches!(recv::<Outbound>(&mut firefox).await, Outbound::Error { .. }), "{id} must stay owned while active");
+    }
+
+    handle.broadcast(Outbound::Finished { id: "done-job".into(), path: "/tmp/a.bin".into(), size: 1, sha256: None, elapsed_ms: 1 });
+    assert!(matches!(recv::<Outbound>(&mut chrome).await, Outbound::Finished { .. }), "owner still gets the final message");
+    handle.release("removed-job");
+
+    for id in ["done-job", "removed-job"] {
+        send(&mut firefox, &grab(&firefox_session, id)).await;
+        let message = tokio::time::timeout(std::time::Duration::from_secs(5), inbound.recv()).await.unwrap_or_else(|_| panic!("{id} still owned")).unwrap();
+        match message.message {
+            Inbound::Grab(grab) => assert_eq!(grab.id, id),
+            other => panic!("expected grab, got {other:?}"),
+        }
+    }
+    handle.shutdown();
+}

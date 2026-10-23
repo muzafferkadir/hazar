@@ -125,6 +125,7 @@ impl CaptureState {
         self.pending.lock().expect("pending").retain(|job| job.id != id);
         let removed = self.queue.lock().expect("queue").remove(id);
         self.requests.lock().expect("requests").remove(id);
+        if let Some(server) = self.server.lock().expect("server lock").as_ref() { server.release(id); }
         self.paused.lock().expect("paused").remove(id);
         self.persist()?;
         self.emit_queue(app);
