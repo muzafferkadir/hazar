@@ -154,7 +154,8 @@ session token + Origin kontrolü. Chrome/Edge'de yalnız Hazar eklentisi kabul e
 `chrome-extension://oclkmglhbgebcpfcellnajdjhfbgikih` origin'ine izin verir
 (`crates/hazar-localapi/src/server.rs` → `EXTENSION_ID`). Firefox her kurulumda rastgele
 bir `moz-extension://` UUID'si verdiği için Firefox'ta herhangi bir eklenti origin'i kabul edilir.
-Web sayfaları ve Origin göndermeyen istemciler reddedilir.
+Web sayfaları ve Origin göndermeyen istemciler reddedilir. İstemci klasör seçemez:
+dosyalar her zaman app'te seçilen indirme klasörüne yazılır.
 
 ## Geliştirme / test
 

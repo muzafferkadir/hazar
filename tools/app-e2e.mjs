@@ -11,12 +11,13 @@
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const APP = process.env.HAZAR_BRIDGE || 'ws://127.0.0.1:8722/hazar';
-const DIR = '/tmp/hz-e2e';
 const EXPECTED_10MB = 'e5b844cc57f57094ea4585e235f36c78c1cd222262bb89d53c94dcb4d6b3e55d';
-
-fs.mkdirSync(DIR, { recursive: true });
+// The app writes into its own download folder, set from hello_ok.
+let DIR = null;
 
 const jobs = new Map(); // id -> {name, startedAt, finishedAt, lastPct}
 let session = null;
@@ -46,6 +47,7 @@ ws.addEventListener('message', (event) => {
   if (message.type === 'hello_ok') {
     session = message.session;
     const s = message.settings;
+    DIR = s.download_dir || path.join(os.homedir(), 'Downloads');
     console.log(`${stamp()} hello_ok: app ${message.app} ${message.version} · protocol ${message.protocol}`);
     console.log(
       `         settings: connections=${s.connections} max_concurrent=${s.max_concurrent_downloads} ` +
@@ -57,7 +59,6 @@ ws.addEventListener('message', (event) => {
       url: 'https://proof.ovh.net/files/10Mb.dat',
       kind: 'file',
       filename: 'limited-10mb.bin',
-      save_dir: DIR,
       connections: 4,
       speed_limit_bps: 1_500_000,
     });
@@ -65,7 +66,6 @@ ws.addEventListener('message', (event) => {
       url: 'https://speed.cloudflare.com/__down?bytes=2000000',
       kind: 'file',
       filename: 'small-2mb.bin',
-      save_dir: DIR,
       connections: 4,
     });
     return;
@@ -119,8 +119,8 @@ try {
   await waitFor(() => finished.size >= 2, 90_000, 'iki indirmenin bitmesi');
 
   console.log('\n== dosya doğrulaması');
-  const big = `${DIR}/limited-10mb.bin`;
-  const small = `${DIR}/small-2mb.bin`;
+  const big = finished.get('e2e-limitsiz-10mb').path;
+  const small = finished.get('e2e-kucuk-2mb').path;
   const bigHash = sha256(big);
   const smallHash = sha256(small);
   const bigStat = fs.statSync(big);
@@ -134,7 +134,6 @@ try {
     url: 'https://proof.ovh.net/files/100Mb.dat',
     kind: 'file',
     filename: 'cancelled.bin',
-    save_dir: DIR,
     connections: 4,
   });
   await new Promise((resolve) => setTimeout(resolve, 2500));

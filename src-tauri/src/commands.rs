@@ -133,7 +133,6 @@ pub fn queue_add(
     app: AppHandle,
     state: State<'_, Arc<CaptureState>>,
     url: String,
-    dest: String,
     connections: Option<usize>,
     sha256: Option<String>,
     speed_limit_mbps: Option<f64>,
@@ -155,9 +154,7 @@ pub fn queue_add(
         browser_cookies: Vec::new(),
         browser_context: None,
         kind,
-        filename: std::path::Path::new(&dest)
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string()),
+        filename: None,
         mime: None,
         size: None,
         method: Some("GET".to_string()),
@@ -170,10 +167,6 @@ pub fn queue_add(
         page_url: None,
         tab_id: None,
         frame_url: None,
-        save_dir: std::path::Path::new(&dest)
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .map(|parent| parent.display().to_string()),
         connections: connections.map(|value| value as u32),
         expected_sha256: sha256.filter(|value| !value.trim().is_empty()),
         speed_limit_bps,

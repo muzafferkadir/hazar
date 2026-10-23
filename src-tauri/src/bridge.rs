@@ -456,7 +456,6 @@ pub(crate) fn enqueue(
         let ext = original.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
         dest = original.with_file_name(format!("{stem} ({suffix}){ext}")); suffix += 1;
     }
-    request.save_dir = dest.parent().map(|p| p.to_string_lossy().into_owned());
     request.filename = dest.file_name().map(|p| p.to_string_lossy().into_owned());
     state
         .requests
@@ -1178,12 +1177,9 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+// Clients never choose the folder: every download lands in the user's download dir.
 fn resolve_dest(request: &GrabRequest, settings: &Settings) -> PathBuf {
-    let dir = request
-        .save_dir
-        .clone()
-        .or_else(|| settings.download_dir.clone())
-        .unwrap_or_else(default_download_dir);
+    let dir = settings.download_dir.clone().unwrap_or_else(default_download_dir);
     let name = request
         .filename
         .clone()
@@ -1352,6 +1348,17 @@ mod tests {
             "four.dplayer82.site/hls/x/seg-1.ts"
         );
         assert!(!url_label("https://a.example/b?t=1").contains('1'));
+    }
+
+    #[test]
+    fn destination_ignores_client_folder_and_stays_in_download_dir() {
+        let dir = std::env::temp_dir().join(format!("hazar-dest-{}", std::process::id()));
+        let settings = Settings { download_dir: Some(dir.display().to_string()), ..Default::default() };
+        let request: GrabRequest = serde_json::from_value(serde_json::json!({
+            "url": "https://example.com/a.bin", "kind": "file", "save_dir": "/tmp/elsewhere", "filename": "../../evil.sh"
+        }))
+        .unwrap();
+        assert_eq!(resolve_dest(&request, &settings).parent(), Some(dir.as_path()));
     }
 
     #[test]

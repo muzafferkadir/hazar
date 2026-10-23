@@ -165,7 +165,6 @@ async function step(name, fn) {
       headers: Lib.forwardableHeaders([{ name: "Authorization", value: "Bearer t" }]),
       page_url: "https://site.example/watch",
       tab_id: 7,
-      save_dir: null,
       segments: ["https://cdn.example.com/vod/high/seg0.ts"],
       manifest: null,
     };

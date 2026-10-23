@@ -167,8 +167,6 @@ pub struct GrabRequest {
     pub frame_url: Option<String>,
     #[serde(default)]
     pub tab_id: Option<i64>,
-    #[serde(default)]
-    pub save_dir: Option<String>,
     /// Uygulamadan gelen işler için ek parametreler (extension bunları yok sayar).
     #[serde(default)]
     pub connections: Option<u32>,

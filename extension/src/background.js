@@ -1250,7 +1250,6 @@ async function buildRequest({ url, kind, meta, item, tabId, pageUrl, pageTitle }
       (frameCandidate && frameCandidate.frameUrl) ||
       null,
     tab_id: typeof tabId === "number" ? tabId : (meta && meta.tabId) ?? null,
-    save_dir: null,
     segments: null,
     manifest: null,
   };

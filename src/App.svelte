@@ -48,7 +48,7 @@
       const parsed = new URL(url.trim())
       if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error(t.httpRequired)
       adding = true; message = ''
-      await invoke('queue_add', { url: parsed.href, dest: '', connections: null, sha256: null, speedLimitMbps: null })
+      await invoke('queue_add', { url: parsed.href, connections: null, sha256: null, speedLimitMbps: null })
       url = ''; await refresh()
     } catch (error) { message = String(error) } finally { adding = false }
   }
