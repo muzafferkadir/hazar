@@ -1,15 +1,15 @@
 /**
- * Kurulu Hazar.app içindeki eklentiyi headless Chrome'a yükleyip gerçek app'e
+ * Kurulu Hazar Download Manager.app içindeki eklentiyi headless Chrome'a yükleyip gerçek app'e
  * bağlandığını doğrular (CDP üzerinden service worker durumu okunur).
  *
- *   node /tmp/hz-ext-check.mjs
+ *   node tools/extension-check.mjs
  */
 import { spawn } from 'node:child_process';
 
 const CHROME =
   process.env.HAZAR_CHROME ||
   `${process.env.HOME}/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
-const EXTENSION = process.env.HAZAR_EXTENSION_DIR || '/Applications/Hazar.app/Contents/Resources/extension';
+const EXTENSION = process.env.HAZAR_EXTENSION_DIR || '/Applications/Hazar Download Manager.app/Contents/Resources/extension';
 const PORT = 9333;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

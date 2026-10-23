@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hazar installer for macOS.
 #   curl -fsSL https://raw.githubusercontent.com/muzafferkadir/hazar/main/install.sh | bash
-# Downloads the latest .dmg from GitHub Releases and installs Hazar.app into
+# Downloads the latest .dmg from GitHub Releases and installs Hazar Download Manager.app into
 # /Applications. The build is ad-hoc signed, so the quarantine flag is cleared.
 set -euo pipefail
 

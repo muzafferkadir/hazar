@@ -39,8 +39,8 @@ Or grab the DMG / installer from [Releases](https://github.com/muzafferkadir/haz
 
 ## Features
 
-- ⚡ **Multi-connection downloads** — segmented HTTP(S) with resume, retries and optional SHA-256 check.
-- 🎬 **Streams** — HLS (AES-128, separate audio) and DASH, merged to MP4 with bundled FFmpeg. No re-encode.
+- ⚡ **Multi-connection downloads** — segmented HTTP(S) with resume and retries.
+- 🎬 **Streams** — HLS (AES-128, separate audio) and DASH; separate audio and video tracks are merged with bundled FFmpeg. No re-encode.
 - ▶️ **YouTube & 1000+ sites** — bundled yt-dlp; pick the quality (2160p … 144p) right on the video.
 - 🧩 **Browser capture** — a small Hazar button on every video, context menu, and automatic download takeover with cookies/referer.
 - 🌗 **Native feel** — macOS vibrancy, light/dark mode, menu bar mode, English and Turkish UI.

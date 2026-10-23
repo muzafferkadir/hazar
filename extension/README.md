@@ -1,22 +1,24 @@
-# Hazar Integration — kurulum (unpacked)
+# Hazar Download Manager eklentisi — kurulum (unpacked)
 
-Hazar'ın tarayıcı eklentisi. Chrome Web Store / AMO'da **yayınlanmıyor**; klasör
-olarak verilir ve tarayıcıya "unpacked" yüklenir.
+Hazar Download Manager'ın tarayıcı eklentisi. Chrome Web Store / AMO'da **yayınlanmıyor**;
+klasör olarak verilir ve tarayıcıya "unpacked" yüklenir.
 
-## 1) Eklentiyi indir
+## 1) Eklentiyi al
 
-Release sayfasından `artifacts/hazar-extension-vX.Y.Z.zip` dosyasını indir ve bir klasöre çıkar
-(örn. `~/hazar-extension`). Klasörün içinde `manifest.json` **doğrudan** görünmeli —
-yani zip'i çıkarınca `hazar-extension/manifest.json`, `hazar-extension/src/...` olsun.
+- Uygulamada **Ayarlar → Eklentiyi kaydet** (EN: **Settings → Save extension**): seçtiğin
+  klasöre `Hazar-extension/` yazılır.
+- Ya da release sayfasındaki `hazar-extension-vX.Y.Z.zip` dosyasını indirip bir klasöre çıkar
+  (örn. `~/hazar-extension`). Klasörün içinde `manifest.json` **doğrudan** görünmeli.
 
 > Repodan kullanıyorsan: `extension/` klasörünün kendisi yeterli, zip gerekmez.
 
 ## 2) Hazar uygulamasını aç
 
-- macOS: `Hazar.app` (DMG'den kurdun) · Windows: kurulumdan sonra **Hazar**
+- macOS: `Hazar Download Manager.app` (DMG'den) · Windows: kurulumdan sonra **Hazar Download Manager**
 - Uygulama açılınca köprü `127.0.0.1:8722-8730` üzerinde dinlemeye başlar.
 - Diğer indirmelerin devam etmesi için pencereyi kapatabilirsin; uygulama menü
-  çubuğunda/tray'de kalır (macOS: menü çubuğu → **Aç / Çıkış**).
+  çubuğunda/tray'de kalır (menü: **Open Hazar Download Manager / Quit**). macOS'ta Dock
+  simgesine tıklamak da pencereyi geri açar.
 
 ## 3) Tarayıcıya yükle
 
@@ -35,16 +37,20 @@ yani zip'i çıkarınca `hazar-extension/manifest.json`, `hazar-extension/src/..
 
 ## 4) Çalıştığını doğrula
 
-Eklenti simgesine tıkla: durum **"bağlı · :8722"** olmalı. Değilse **Yeniden bağlan**.
-Uygulama kapalıysa "Hazar açık değil" yazar ve indirmeler tarayıcıda kalır (kaybolmaz).
+Eklenti simgesine tıkla: durum **"Hazar <sürüm> · :8722 · ext <sürüm>"** olmalı. Değilse
+**Yeniden bağlan**. Uygulama kapalıysa "Uygulama kapalı" yazar ve indirmeler tarayıcıda kalır (kaybolmaz).
 
 ## 5) Güncelleme
 
-Eklenti tarayıcı tarayıcı elle güncellenir: yeni zip'i indir, aynı klasöre çıkar
+Eklenti tarayıcı tarayıcı elle güncellenir: yeni sürümü aynı klasöre kaydet/çıkar
 (üzerine yaz), sonra `chrome://extensions` → eklenti kartında **Yenile**.
-Uygulama (Hazar.app) kendi kendini günceller (updater `latest.json` okur).
+Uygulama kendi kendini günceller (updater `latest.json` okur).
 
-## yt-dlp session ve network (0.2.5)
+Eklenti kimliği artık `manifest.json` içindeki `key` ile sabit. Bu değişiklikten önce
+yüklenmiş eski bir eklentiyi **bir kez** kaldırıp yeni klasörü tekrar yükle; eski kimlikli
+eklentinin bağlantısını app reddeder.
+
+## yt-dlp session ve network
 
 - Cookie jar, Referer/User-Agent ve özel captured header'lar ile fresh context. Header'lar origin ile sınırlıdır; cross-origin redirect'te auth taşınmaz. YouTube header/auth üretimi yt-dlp'ye bırakılır.
 - Chrome fixed proxy ayarı okunur; PAC/auto-detect manuel URL ister. Network ayarları extension options içindeki kapalı details bölümündedir. Proxy/source IP eşlemesi gerçek çıkış IP'sinin eşit olduğunun kanıtı değildir. Farklı host/protokol bypass kuralları olan proxy için açık URL tercih edilmelidir. Browser proxy credential challenge aktarılmaz.
@@ -55,7 +61,7 @@ Uygulama (Hazar.app) kendi kendini günceller (updater `latest.json` okur).
 
 ## yt-dlp alternatifi
 
-0.2.4+ app `ytdlp` capability’si verir. Popup açılınca veya görünür video bulunduğunda sayfanın metadata'sı app içindeki yt-dlp ile analiz edilir. İndirilebilir video bulunursa normal Hazar adaylarına ek olarak kırmızı `yt-dlp` adayı gösterilir. Tıklanan seçenek hangi engine'in kullanılacağını belirler; otomatik fallback yoktur. yt-dlp için MP4 video output seçilir; audio mevcutsa mux edilir. YouTube için video ve audio birlikte zorunludur.
+App `ytdlp` capability’si verir (0.3.0+). Popup açılınca veya görünür video bulunduğunda sayfanın metadata'sı app içindeki yt-dlp ile analiz edilir. İndirilebilir video bulunursa normal Hazar adaylarına ek olarak ayrı bir `yt-dlp` adayı gösterilir. Tıklanan seçenek hangi engine'in kullanılacağını belirler; otomatik fallback yoktur. yt-dlp için MP4 video output seçilir; audio mevcutsa mux edilir. YouTube için video ve audio birlikte zorunludur.
 
 Extension cookie API üzerinden ilgili sayfa ve gözlenmiş player frame domain'lerinin cookie'lerini alır. Domain/path/secure/expiry/HttpOnly metadata korunur; app özel geçici cookie jar ve Referer/User-Agent ile probe/download process'ine aktarır. Cookie jar normal tamamlanma, hata ve cancellation sonunda silinir. Cookie değerleri queue JSON'una yazılmaz; browser DB okunmaz. Download başlangıcında fresh context istenir. Tab kapanmış/değişmiş veya app restart sonrası session ownership kaybolmuşsa extension’dan yeniden gönderilmelidir. Chrome 132+ frame partition API varsa seçilmiş frame partition’ı job’a özel jar’a aktarılır; eski browser/Firefox aynı API’yi sağlamayabilir. Yeni domain'e yönlenen extractor'ın ek oturuma ihtiyacı olabilir; DRM, live ve playlist kapsam dışıdır.
 
@@ -63,7 +69,7 @@ Probe sonucu kısa süre cache'lenir. Site değişiklikleri/login/PO token/anti-
 
 ## Video paneli ve toplu linkler
 
-Video tespit edilince player'ın sağ üstünde **Hazar ile indir** çıkar. Birden fazla kalite varsa buton kalite menüsünü açar. HLS master'ın AUDIO grubu seçilen kaliteye göre çözülür; ayrı audio/video segmentleri browser oturumundan app'e aktarılır ve FFmpeg ile mux edilir. App'in `hls_audio_bytes` capability'si gerekir (0.2.2+).
+Video tespit edilince player'ın sağ üstünde **Hazar ile indir** çıkar. Birden fazla kalite varsa buton kalite menüsünü açar. HLS master'ın AUDIO grubu seçilen kaliteye göre çözülür; ayrı audio/video segmentleri browser oturumundan app'e aktarılır ve FFmpeg ile mux edilir. App'in `hls_audio_bytes` capability'si gerekir (0.3.0+).
 
 Panel her iframe'in kendi content script'inde çalışır. Source eşleşmeyen birden fazla player varsa yalnız tek aktif player'a network adayları bağlanır. Scroll, resize, DOM source değişimi ve fullscreen izlenir. Native video-element fullscreen overlay göstermez; player container fullscreen desteklenir. DOM `<track>` subtitle/caption linkleri menüye eklenir; HLS subtitle rendition indirme henüz yoktur.
 

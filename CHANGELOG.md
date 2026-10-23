@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Güvenlik: köprü yalnız Hazar eklentisinin origin'ini kabul eder; başka eklentiler ve Origin göndermeyen istemciler reddedilir. Chrome/Edge eklenti kimliği `manifest.json` içindeki `key` ile sabitlendi (`oclkmglhbgebcpfcellnajdjhfbgikih`): eski eklentiyi bir kez kaldırıp yeniden yükle. Firefox her kurulumda rastgele UUID verdiği için `moz-extension://` origin'leri kabul edilir.
+- Güvenlik: istemci indirme klasörü seçemez; dosyalar her zaman ayarlardaki indirme klasörüne yazılır.
+- Windows: varsayılan indirme klasörü sistemin Downloads klasörü (önceden çoğu zaman tanımsız olan `HOME` okunuyordu).
+- macOS: pencere kapatıldıktan sonra Dock simgesine tıklamak pencereyi geri açar.
+- Biten ve listeden silinen işlerin sahiplik kaydı temizlenir; uzun oturumlarda yeni işler reddedilmez.
+- Arayüzü olmayan zamanlanmış indirme, kullanılmayan komutlar ve eklentinin `notifications` izni kaldırıldı.
+
 ## 0.3.0 — 2026-10-01
 
 - Uygulama adı **Hazar Download Manager**; göl mavisi yeni logo, app + extension için ortak renk token'ları, light/dark mode.
@@ -7,9 +16,6 @@
 - Video paneli: sağ üstte küçük logo, tıklayınca kalite listesi (2160p…144p), × ile kapanır; ↻ ile manuel yeniden tarama (popup'ta da).
 - yt-dlp tüm kaliteleri listeler, seçilen yükseklik indirilir. Analiz metadata'sı download'da tekrar kullanılır; aynı video URL varyantları için tekrar analiz yapılmaz.
 - yt-dlp adayları hata kırmızısı yerine outline stil; bağlantı yokken doğru hata mesajı.
-
-## 0.2.5 — 2026-10-01
-
 - yt-dlp probe hataları login/PO token/403/429/runtime/unsupported/DRM/timeout olarak sınıflanır ve popup'ta gösterilir; rate limit cooldown ve manuel tekrar analiz.
 - Download başlangıcında extension'dan fresh browser context; tab/page değişmişse açık ret. Seçilen frame partition cookie'leri job'a özel jar'a aktarılır.
 - Captured özel header'lar origin ile sınırlı bundled plugin üzerinden uygulanır; cross-origin redirect'te auth bilgileri temizlenir. YouTube kendi auth/header üretimini kullanır.
@@ -17,24 +23,15 @@
 - Sabit sürüm/checksum ile paketli bgutil 2.0.0 PO token Deno script provider; HTTP service veya ayrı Node kurulumu gerekmez. macOS canvas addon'ları arm64/x64, Windows x64.
 - YouTube önce guest session kullanır; login gerektiğinde mevcut browser account session ile bir kez retry eder.
 - Cookie/header/token context kalıcı queue state'e yazılmaz. Timeout/cancel process ağacını sonlandırır; provider cache job'ın geçici klasöründe kalır.
-
-## 0.2.4 — 2026-10-01
-
 - yt-dlp, YouTube dışındaki video sayfalarını da metadata probe ile çözebilir; download kullanıcı seçimiyle başlar.
-- Hazar medya adayları korunur; yt-dlp adayları popup ve video panelinde kırmızı renk + yt-dlp etiketiyle ayrı gösterilir.
+- Hazar medya adayları korunur; yt-dlp adayları popup ve video panelinde yt-dlp etiketiyle ayrı gösterilir.
 - Browser oturumundan domain/path/secure/expiry/HttpOnly bilgili cookie jar, Referer ve User-Agent yt-dlp'ye aktarılır. Cookie jar işlem sonunda silinir; cookie değerleri queue state'e yazılmaz.
 - yt-dlp probe cache ve iki process sınırı; playlist/live/DRM adayları gösterilmez. Normal download için otomatik fallback eklenmez.
-
-## 0.2.3 — 2026-10-01
-
 - YouTube watch/embed/shorts/live/youtu.be linkleri normal HTML file download yerine yt-dlp yoluna yönlenir.
 - Sabit sürüm/checksum ile paketlenen yt-dlp + Deno; EJS solver standalone binary içinde, FFmpeg audio/video mux.
 - Video/audio track kontrolünden önce done verilmez; extractor hatasında HTML fallback yoktur.
 - YouTube popup/player paneli raw fragment yerine gerçek video linkini gönderir.
 - HTML response file download için açık hata üretir; eski HTML YouTube queue kayıtları startup’ta failed olur.
-
-## 0.2.2 — 2026-10-01
-
 - Browser HLS akışında seçilen variant’ın ayrı audio rendition bilgisi korunur; video/audio capture sonrası FFmpeg mux yapılır. AES-128/init/BYTERANGE metadata capture planında tutulur.
 - Header sabit ve butonlar dışındaki alanlardan sürüklenebilir; URL formu butonla açılır.
 - Queue kaydı silme ve listeyi sıfırlama; indirilen dosyalar korunur.

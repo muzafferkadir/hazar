@@ -1,7 +1,7 @@
 /**
  * Gerçek uygulamaya karşı uçtan uca test (app çalışır durumda olmalı).
  *
- *   node /tmp/hz-e2e.mjs
+ *   node tools/app-e2e.mjs
  *
  * Yaptığı:
  *  1) köprüye hello → settings/feature doğrulaması
