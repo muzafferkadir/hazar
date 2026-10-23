@@ -1262,8 +1262,8 @@ mod tests {
     #[test]
     fn url_label_strips_query_and_fragment() {
         assert_eq!(
-            url_label("https://four.dplayer82.site/hls/x/seg-1.ts?token=SECRET#frag"),
-            "four.dplayer82.site/hls/x/seg-1.ts"
+            url_label("https://cdn.player.example/hls/x/seg-1.ts?token=SECRET#frag"),
+            "cdn.player.example/hls/x/seg-1.ts"
         );
         assert!(!url_label("https://a.example/b?t=1").contains('1'));
     }

@@ -37,7 +37,7 @@
     if (MANIFEST.test(url) || MANIFEST_MIME.test(text)) return "manifest";
     if (SEGMENT.test(url)) return "segment";
     // Token/segment URLs often carry no extension at all; the MIME is the only
-    // signal (dplayer82-style players do this).
+    // signal (some iframe players do this).
     if (/^(video\/mp2t|video\/mp4|audio\/mp4)\b/i.test(text)) return "segment";
     return null;
   }

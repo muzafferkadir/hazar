@@ -1168,28 +1168,28 @@ pub fn build() -> Fixtures {
 pub fn live_like_routes() -> Vec<Route> {
     let mut routes: Vec<Route> = Vec::new();
 
-    // hdfilmcehennemi: player lives inside an iframe.
+    // iframe-player: player lives inside an iframe.
     {
-        let ladder = hls("/live/hdfilmcehennemi", HlsOpts { segments: 3, ..Default::default() });
+        let ladder = hls("/live/iframe-player", HlsOpts { segments: 3, ..Default::default() });
         routes.extend(ladder.routes);
         routes.push(Route::html(
-            "/live/hdfilmcehennemi/player.html",
+            "/live/iframe-player/player.html",
             format!(
                 "<html><body><video controls src=\"{}\"></video></body></html>",
                 ladder.manifest_path
             ),
         ));
         routes.push(Route::html(
-            "/live/hdfilmcehennemi/page.html",
-            "<html><body><iframe src=\"/live/hdfilmcehennemi/player.html\" allowfullscreen></iframe></body></html>"
+            "/live/iframe-player/page.html",
+            "<html><body><iframe src=\"/live/iframe-player/player.html\" allowfullscreen></iframe></body></html>"
                 .to_string(),
         ));
     }
 
-    // dizipal: player config in an external file + expiring token segments.
+    // token-segments: player config in an external file + expiring token segments.
     {
         let ladder = hls(
-            "/live/dizipal",
+            "/live/token-segments",
             HlsOpts {
                 segments: 3,
                 expiring: true,
@@ -1198,11 +1198,11 @@ pub fn live_like_routes() -> Vec<Route> {
         );
         routes.extend(ladder.routes);
         routes.push(Route::html(
-            "/live/dizipal/page.html",
-            "<html><body><script src=\"/live/dizipal/player.js\"></script></body></html>".to_string(),
+            "/live/token-segments/page.html",
+            "<html><body><script src=\"/live/token-segments/player.js\"></script></body></html>".to_string(),
         ));
         routes.push(Route::new(
-            "/live/dizipal/player.js",
+            "/live/token-segments/player.js",
             "application/javascript",
             format!("var cfg={{\"sources\":[{{\"file\":\"{}\"}}]}};", ladder.manifest_path)
                 .into_bytes(),
@@ -1265,7 +1265,7 @@ pub fn live_like_routes() -> Vec<Route> {
         ));
     }
 
-    // iframe + expiring-token HLS (hdfilmcehennemi / dizipal şekli), manifest
+    // iframe + expiring-token HLS (iframe-player / token-segments şekli), manifest
     // URL'i iframe içindeki script tarafından runtime'da kuruluyor.
     {
         let ladder = hls(
@@ -1342,12 +1342,12 @@ pub fn live_like_routes() -> Vec<Route> {
         ));
     }
 
-    // dplayer82 shape (captured from a real episode page): the top page embeds a
+    // iframe-mse shape (derived from a real player capture): the top page embeds a
     // cross-origin player iframe; the player builds a *token* manifest URL at
     // runtime and serves extension-less segments.
     {
         let ladder = hls(
-            "/live/dplayer82/master",
+            "/live/iframe-mse/master",
             HlsOpts {
                 segments: 4,
                 expiring: true,
@@ -1356,21 +1356,21 @@ pub fn live_like_routes() -> Vec<Route> {
         );
         routes.extend(ladder.routes);
         routes.push(Route::html(
-            "/live/dplayer82/page.html",
-            "<html><body><iframe src=\"/live/dplayer82/player.html\" allowfullscreen></iframe></body></html>"
+            "/live/iframe-mse/page.html",
+            "<html><body><iframe src=\"/live/iframe-mse/player.html\" allowfullscreen></iframe></body></html>"
                 .to_string(),
         ));
         routes.push(Route::html(
-            "/live/dplayer82/player.html",
-            "<html><body><video controls></video><script src=\"/live/dplayer82/player.js\"></script></body></html>"
+            "/live/iframe-mse/player.html",
+            "<html><body><video controls></video><script src=\"/live/iframe-mse/player.js\"></script></body></html>"
                 .to_string(),
         ));
         routes.push(Route::new(
-            "/live/dplayer82/player.js",
+            "/live/iframe-mse/player.js",
             "application/javascript",
             r#"(async function () {
                 var token = btoa(['token', 'part', 'x'].join(''));
-                var p = ['/live', '/dplayer82', '/master', '/index.m3u8?v='].join('');
+                var p = ['/live', '/iframe-mse', '/master', '/index.m3u8?v='].join('');
                 var r = await fetch(p + token);
                 var t = await r.text();
                 var urls = t.split(String.fromCharCode(10)).map(function (l) { return l.trim(); }).filter(function (l) { return l && l[0] !== '#'; });

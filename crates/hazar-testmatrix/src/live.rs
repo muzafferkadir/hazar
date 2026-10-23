@@ -101,8 +101,8 @@ pub struct SiteProfile {
 pub fn profiles() -> Vec<SiteProfile> {
     vec![
         SiteProfile {
-            name: "hdfilmcehennemi",
-            url: "https://www.hdfilmcehennemi.nl/",
+            name: "iframe-player",
+            url: "https://iframe-player.example/",
             player: "iframe + player config",
             expected: Expected::Hls,
             needs: Needs {
@@ -112,13 +112,13 @@ pub fn profiles() -> Vec<SiteProfile> {
             },
             browser: true,
             proxy: true,
-            note: "giriş sayfası; film sayfası URL'i HAZAR_LIVE_HDFILMCEHENNEMI_URL ile verilir",
+            note: "örnek host; gerçek medya sayfası HAZAR_LIVE_IFRAME_PLAYER_URL ile verilir",
             gated: None,
             expect_failure: None,
         },
         SiteProfile {
-            name: "dizipal",
-            url: "https://dizipal.com/",
+            name: "token-segments",
+            url: "https://token-segments.example/",
             player: "player config + token'lı segment",
             expected: Expected::Hls,
             needs: Needs {
@@ -128,7 +128,7 @@ pub fn profiles() -> Vec<SiteProfile> {
             },
             browser: true,
             proxy: false,
-            note: "domain teyidi gerekir (HAZAR_LIVE_DIZIPAL_URL)",
+            note: "örnek host; gerçek medya sayfası HAZAR_LIVE_TOKEN_SEGMENTS_URL ile verilir",
             gated: None,
             expect_failure: None,
         },
@@ -171,8 +171,8 @@ pub fn profiles() -> Vec<SiteProfile> {
 pub fn selftest_profiles() -> Vec<SiteProfile> {
     vec![
         SiteProfile {
-            name: "hdfilmcehennemi",
-            url: "/live/hdfilmcehennemi/page.html",
+            name: "iframe-player",
+            url: "/live/iframe-player/page.html",
             player: "iframe + player page",
             expected: Expected::Hls,
             needs: Needs {
@@ -187,8 +187,8 @@ pub fn selftest_profiles() -> Vec<SiteProfile> {
             expect_failure: None,
         },
         SiteProfile {
-            name: "dizipal",
-            url: "/live/dizipal/page.html",
+            name: "token-segments",
+            url: "/live/token-segments/page.html",
             player: "player config + expiring token",
             expected: Expected::Hls,
             needs: Needs {
@@ -277,8 +277,8 @@ pub fn selftest_browser_profiles() -> Vec<SiteProfile> {
             expect_failure: None,
         },
         SiteProfile {
-            name: "dplayer82-shape",
-            url: "/live/dplayer82/page.html",
+            name: "iframe-mse-shape",
+            url: "/live/iframe-mse/page.html",
             player: "iframe player + token manifest + MSE segments",
             expected: Expected::Hls,
             needs: Needs {
@@ -288,7 +288,7 @@ pub fn selftest_browser_profiles() -> Vec<SiteProfile> {
             },
             browser: true,
             proxy: false,
-            note: "gerçek dizipal yakalamasından türetildi (four.dplayer82.site/master.m3u8?v=…)",
+            note: "gerçek bir player yakalamasından türetildi (iframe player, master.m3u8?v=<token>)",
             gated: None,
             expect_failure: None,
         },
@@ -316,7 +316,7 @@ pub fn selftest_browser_profiles() -> Vec<SiteProfile> {
             },
             browser: true,
             proxy: false,
-            note: "hdfilmcehennemi/dizipal şekli",
+            note: "iframe-player/token-segments şekli",
             gated: None,
             expect_failure: None,
         },
@@ -638,7 +638,7 @@ async fn browser_rows(profiles: Vec<SiteProfile>, base: &str, row_prefix: &str) 
         return Vec::new();
     }
 
-    // Sites differ on proxies: dizipal/Cloudflare blocks residential exits, others
+    // Sites differ on proxies: some Cloudflare-fronted sites block residential exits, others
     // need one. Run each group in its own browser session.
     let mut with_proxy = Vec::new();
     let mut direct = Vec::new();

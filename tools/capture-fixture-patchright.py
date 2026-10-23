@@ -2,7 +2,7 @@
 """
 Hazar capture-flow check with Patchright (throwaway profile, local fixture).
 
-Mimics the dizipal/dplayer82 shape:
+Mimics an iframe player with token manifests:
   page -> iframe player -> fetch(token master.m3u8) -> fetch(token variant) -> fetch first segment
 
 Gates (like a real CDN):
