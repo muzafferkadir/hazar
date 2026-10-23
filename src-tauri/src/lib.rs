@@ -53,12 +53,7 @@ pub fn run() {
                         .menu(&menu)
                         .show_menu_on_left_click(true)
                         .on_menu_event(|app, event| match event.id().as_ref() {
-                            "open" => {
-                                if let Some(window) = app.get_webview_window("main") {
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
-                                }
-                            }
+                            "open" => show_main_window(app),
                             "quit" => app.exit(0),
                             _ => {}
                         })
@@ -100,8 +95,22 @@ pub fn run() {
             commands::extension_reveal,
             commands::extension_export
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running hazar");
+        .build(tauri::generate_context!())
+        .expect("error while building hazar")
+        .run(|_app, _event| {
+            // Closing only hides the window, so a Dock icon click has to bring it back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows: false, .. } = _event {
+                show_main_window(_app);
+            }
+        });
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 /// Re-export for the UI state type.
